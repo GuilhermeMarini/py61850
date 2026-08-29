@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py61850"
+dynamic = ["version"]
+description = "Pure-Python IEC 61850 toolkit — MMS (ISO 9506) client today; GOOSE and SV planned. Standard library only."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Guilherme" }]
+keywords = ["iec61850", "mms", "iso9506", "goose", "sampled-values", "scada", "relay", "ied", "substation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Networking",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = []  # zero runtime dependencies — keep it that way
+
+[project.urls]
+Homepage = "https://github.com/GuilhermeMarini/py61850"
+Repository = "https://github.com/GuilhermeMarini/py61850"
+Issues = "https://github.com/GuilhermeMarini/py61850/issues"
+Changelog = "https://github.com/GuilhermeMarini/py61850/blob/main/ROADMAP.md"
+
+[project.scripts]
+py61850 = "py61850.cli.main:main"
+mms-scan = "py61850.cli.scan:main"
+mms-files = "py61850.cli.files:main"
+
+# Single source of truth for the version: src/py61850/__init__.py.
+# The release workflow refuses to publish when the git tag disagrees with it.
+[tool.hatch.version]
+path = "src/py61850/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/py61850"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "README.md", "ROADMAP.md", "LICENSE"]

@@ -1,0 +1,99 @@
+# Offline test matrix. The suite opens no sockets and needs no relay, so every
+# job here is hermetic — see tests/README.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          # Applications built on this library run on Windows, so cover both
+          # ends of the supported range there rather than Linux only.
+          - { os: windows-latest, python: "3.9" }
+          - { os: windows-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.14" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Assert zero runtime dependencies
+        # The defining constraint of the package: `pip install py61850` must
+        # pull nothing. A stray dependency should fail the build, not ship.
+        run: >
+          python -c "import importlib.metadata as md;
+          r = md.requires('py61850') or [];
+          assert not r, f'unexpected runtime dependencies: {r}';
+          print('zero runtime dependencies')"
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t .
+
+      - name: Byte-compile
+        run: python -m compileall -q src tests
+
+      - name: Public API imports clean
+        run: python -c "import py61850 as m; print(m.__version__, m.__all__)"
+
+  build:
+    name: Build & verify distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Install the wheel clean and exercise the public surface
+        # Catches packaging faults the editable install cannot see — a missing
+        # py.typed, a module left out of the wheel, a broken console script.
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/python -m pip install --quiet --no-index dist/*.whl
+          /tmp/wheeltest/bin/python -c "import py61850 as m; print(m.__version__, m.__all__)"
+          /tmp/wheeltest/bin/python -c "
+          import pathlib, py61850
+          marker = pathlib.Path(py61850.__file__).parent / 'py.typed'
+          assert marker.exists(), 'py.typed missing from the wheel'
+          print('py.typed shipped')"
+          /tmp/wheeltest/bin/py61850 --help
+          /tmp/wheeltest/bin/mms-scan --help > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

@@ -1,0 +1,125 @@
+# Publish to PyPI via Trusted Publishing (OIDC) — no API token is stored in
+# this repository. PyPI must list this repo, workflow file and environment as a
+# trusted publisher for the `py61850` project (Manage project → Publishing).
+#
+#   Tag push  v0.2.0   ->  build -> publish to PyPI -> GitHub release
+#   Manual run          ->  build -> publish to TestPyPI (rehearsal)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to publish
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Tag must match the packaged version
+        # The version lives in src/py61850/__init__.py and hatchling reads it
+        # from there, so a tag that disagrees means one of the two was missed.
+        # Cheaper to fail here than to yank a release.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c "
+          import pathlib, re
+          src = pathlib.Path('src/py61850/__init__.py').read_text()
+          print(re.search(r'__version__ = \"([^\"]+)\"', src).group(1))")"
+          echo "tag=$tag  __version__=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match __version__ $pkg"
+            exit 1
+          fi
+
+      - name: Tests must pass on the tagged tree
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m unittest discover -s tests -t .
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/py61850
+    permissions:
+      id-token: write        # mint the OIDC token; no password needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.target == 'pypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/py61850
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the release and attach the artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --title "$GITHUB_REF_NAME"
+          --generate-notes
