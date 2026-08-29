@@ -9,3 +9,16 @@ venv/
 downloads/
 relay_files/
 inventory.csv
+
+# SCL / IED capability files (vendor-supplied, large, not redistributable)
+*.icd
+*.ICD
+*.cid
+*.CID
+*.scd
+*.SCD
+*.iid
+*.IID
+*.sed
+*.SED
+fixtures/ICD/
