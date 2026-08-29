@@ -85,6 +85,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # A rehearsal usually re-uploads a version already there. Skip it
+          # rather than fail the run; TestPyPI rejects duplicate filenames.
+          skip-existing: true
 
   pypi:
     name: Publish to PyPI
