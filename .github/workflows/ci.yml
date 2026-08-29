@@ -31,9 +31,9 @@ jobs:
           - { os: windows-latest, python: "3.14" }
           - { os: macos-latest, python: "3.14" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
@@ -64,9 +64,9 @@ jobs:
     name: Build & verify distributions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
@@ -93,7 +93,7 @@ jobs:
           /tmp/wheeltest/bin/py61850 --help
           /tmp/wheeltest/bin/mms-scan --help > /dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
