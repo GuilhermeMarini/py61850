@@ -226,3 +226,19 @@ python -m unittest discover -s tests -t .
 
 Standard-library `unittest`, no test dependencies, and entirely offline — see
 [tests/README.md](tests/README.md).
+
+## Licence
+
+py61850 is dual-licensed.
+
+- **[GNU AGPL v3 or later](LICENSE)** — free to use, study, modify and share.
+  If you distribute software built on py61850, or let users reach it over a
+  network, the whole work must be released under the AGPL as well, source
+  included. Using it inside your own organisation, with nothing published and
+  no outside users, costs nothing and requires nothing.
+- **[Commercial licence](COMMERCIAL.md)** — for closed-source products or hosted
+  services that cannot publish their source under the AGPL. Available from the
+  copyright holder on negotiated terms.
+
+Contributions are welcome under the [CLA](CLA.md), which is what keeps that
+second option possible — see [CONTRIBUTING.md](CONTRIBUTING.md).
