@@ -52,6 +52,18 @@ different seams, so they were cut before the code arrived rather than after.
 
 Make the client dependable enough for unattended fleet jobs to build on.
 
+- ✅ COTP DT fragmentation on send (`osi/cotp.py`). `send()` used to emit one
+      oversized DT whatever the payload, so any request past the negotiated
+      TPDU size made the relay drop the association — no MMS error, just a
+      closed socket on the next `recv()`. `recv()` already reassembled; the
+      transport was only asymmetric.
+- ✅ Negotiated limits are parsed and exposed: `CotpTransport.negotiated_tpdu_size`
+      from the CC, `MmsClient.max_pdu_size` / `max_outstanding` from the
+      Initiate-Response. They are different ceilings — an SEL-451 answers 12000
+      bytes of MMS PDU over a 1024-byte TPDU — and a batching client owes both.
+- ✅ Multi-variable Read and DataSet Read (`read_many`, `read_data_set`).
+      Reading a 170-bit logic diagram one variable at a time is 170 requests;
+      batched against the negotiated PDU size it is ~12.
 - 🔜 `write` / `SetDataValues` (MMS Write) — currently read-only.
       Add as `mms/services/write.py`; `core.data.encode_data` is already there.
 - 🔜 `MmsClientPool` — per-thread/pooled clients so a web/GUI app can serve
@@ -188,3 +200,10 @@ of IEC 61850 (fast, multicast, publish/subscribe over raw Ethernet, not MMS/TCP)
       MMS name-string plumbing, so apps address `LD0/LLN0.Beh.stVal` not
       `LLN0$ST$Beh$stVal`.
 - 💡 Optional async client (`asyncio`) for large fleet fan-out.
+- ❌ **Do not add request pipelining.** Writing N requests before reading their
+      responses was measured against an SEL-451 at ~3x *slower* than sequential
+      (3 reads: 14.5 ms → 52.1 ms; 6: 28.4 → 91.8; 8: 37.0 → 68.0), even though
+      the relay advertises `maxServOutstanding=3`. The extra ~40 ms per cycle is
+      the delayed-ACK signature. Batching into one PDU (`read_many`) is the
+      lever; concurrency on the one socket is not. Recorded here so it does not
+      get proposed again.

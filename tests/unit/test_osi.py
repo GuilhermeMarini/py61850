@@ -7,7 +7,27 @@ from py61850.core import ber
 from py61850.errors import TransportError
 from py61850.mms import pdu
 from py61850.osi import acse, presentation, session, stack, tpkt
+from py61850.osi import cotp
 from py61850.osi.cotp import CotpTransport
+
+
+class FakeSocket:
+    """Captures what CotpTransport writes; recv() is never used here."""
+
+    def __init__(self):
+        self.sent = b""
+
+    def sendall(self, data):
+        self.sent += data
+
+    def frames(self):
+        """The TPKT payloads (i.e. the COTP TPDUs) written so far."""
+        out, i = [], 0
+        while i < len(self.sent):
+            n = tpkt.payload_len(self.sent[i:i + tpkt.HEADER_LEN])
+            out.append(self.sent[i + tpkt.HEADER_LEN:i + tpkt.HEADER_LEN + n])
+            i += tpkt.HEADER_LEN + n
+        return out
 
 
 class TestTpkt(unittest.TestCase):
@@ -41,6 +61,62 @@ class TestCotp(unittest.TestCase):
             b"\xc0\x01\x0a"               # TPDU size 2**10
             b"\xc1\x02\x00\x01"           # calling TSAP
             b"\xc2\x02\x00\x01")          # called TSAP
+
+    def test_negotiated_size_defaults_to_what_we_proposed(self):
+        self.assertEqual(CotpTransport("10.0.0.1").negotiated_tpdu_size, 1024)
+
+    def test_cc_lowers_the_negotiated_size(self):
+        """We propose 4096; the relay answers 1024 and that is what binds."""
+        cc = b"\x0d\xd0\x00\x01\x00\x02\x00" b"\xc0\x01\x0a" b"\xc2\x02\x00\x01"
+        self.assertEqual(cotp.negotiated_size_from(cc, 4096), 1024)
+
+    def test_cc_cannot_raise_the_negotiated_size(self):
+        """ISO 8073 lets the responder only lower the proposal, never raise it."""
+        cc = b"\x09\xd0\x00\x01\x00\x02\x00" b"\xc0\x01\x0c"
+        self.assertEqual(cotp.negotiated_size_from(cc, 1024), 1024)
+
+    def test_cc_without_the_parameter_accepts_our_proposal(self):
+        cc = b"\x06\xd0\x00\x01\x00\x02\x00"
+        self.assertEqual(cotp.negotiated_size_from(cc, 1024), 1024)
+
+    def test_split_dt_leaves_a_small_payload_in_one_tpdu(self):
+        self.assertEqual(cotp.split_dt(b"abc", 1024), [b"\x02\xf0\x80abc"])
+
+    def test_split_dt_still_sends_an_empty_payload(self):
+        self.assertEqual(cotp.split_dt(b"", 1024), [b"\x02\xf0\x80"])
+
+    def test_split_dt_fragments_with_eot_only_on_the_last(self):
+        """A payload over the negotiated size must go out as a DT sequence --
+        sending it as one oversized DT is what makes a relay drop the
+        association, silently."""
+        data = bytes(range(256)) * 12                      # 3072 bytes
+        frames = cotp.split_dt(data, 1024)
+        self.assertEqual(len(frames), 4)                   # 1021 * 3 + 9
+        for f in frames[:-1]:
+            self.assertEqual(f[:3], b"\x02\xf0\x00")      # EOT clear
+            self.assertEqual(len(f), 1024)
+        self.assertEqual(frames[-1][:3], b"\x02\xf0\x80")  # EOT set
+        self.assertEqual(b"".join(f[3:] for f in frames), data)
+
+    def test_exact_multiple_of_the_chunk_size_sets_eot_once(self):
+        frames = cotp.split_dt(b"x" * (1024 - 3), 1024)
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0][2], 0x80)
+
+    def test_send_emits_fragments_over_tpkt(self):
+        t = CotpTransport("10.0.0.1")
+        t.sock = FakeSocket()
+        t.send(b"y" * 2000)
+        frames = t.sock.frames()
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(b"".join(f[3:] for f in frames), b"y" * 2000)
+
+    def test_send_respects_a_lowered_negotiation(self):
+        t = CotpTransport("10.0.0.1")
+        t.sock = FakeSocket()
+        t.negotiated_tpdu_size = 128
+        t.send(b"z" * 500)
+        self.assertEqual(len(t.sock.frames()), 4)          # 125 * 4
 
     def test_custom_tsaps(self):
         t = CotpTransport("10.0.0.1", called_tsap=b"\x00\x02", calling_tsap=b"\x00\x03")

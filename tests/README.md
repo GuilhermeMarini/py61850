@@ -27,6 +27,13 @@ network, and it is thin.
   `extract_mms_from_response` survives a payload whose *content* contains 0x61
   (the byte that a naive scan for fully-encoded-data would trip on).
 
+## BENCH.md
+
+The changes that only a relay can confirm — anything whose correctness lives in
+how *hardware* answers, not in the bytes we build. One entry per open item, with
+the check to run and what a pass looks like. Delete an entry once it has run
+green on the bench.
+
 ## fixtures/
 
 Recorded PDUs from real IEDs, as raw bytes, one service per file. These are the

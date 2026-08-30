@@ -87,6 +87,28 @@ class TestRead(unittest.TestCase):
             b"\xa4\x12\xa1\x10\xa0\x0e\x30\x0c\xa0\x0a"
             b"\xa1\x08\x1a\x03LD0\x1a\x01X")
 
+    def test_build_multi_repeats_the_entry_sequence(self):
+        """listOfVariable is SEQUENCE OF SEQUENCE, so N names means N inner
+        0x30 entries -- not one 0x30 holding N names. A relay accepts the
+        malformed form and quietly answers with a single value."""
+        entry = b"\x30\x0c\xa0\x0a\xa1\x08\x1a\x03LD0\x1a\x01"
+        self.assertEqual(
+            pdu.build_read_multi("LD0", ["X", "Y"]),
+            b"\xa4\x20\xa1\x1e\xa0\x1c" + entry + b"X" + entry + b"Y")
+
+    def test_build_one_is_build_multi_of_one(self):
+        self.assertEqual(pdu.build_read("LD0", "X"),
+                         pdu.build_read_multi("LD0", ["X"]))
+
+    def test_build_named_list(self):
+        # read [4] { varAccessSpec [1] { variableListName [1] { ObjectName } } }
+        # ObjectName is a CHOICE, so [1] is explicit: it wraps domain-specific
+        # [1] rather than replacing its tag.
+        self.assertEqual(
+            pdu.build_read_named_list("LD0", "Set1"),
+            b"\xa4\x11\xa1\x0f\xa1\x0d"
+            b"\xa1\x0b\x1a\x03LD0\x1a\x04Set1")
+
     def test_decode_value(self):
         resp = ber.tlv(pdu.SVC_READ, ber.tlv(0xA1, d.encode_boolean(True)))
         self.assertEqual(pdu.decode_read_response(resp), [True])
@@ -104,6 +126,24 @@ class TestRead(unittest.TestCase):
     def test_decode_unknown_error_code(self):
         resp = ber.tlv(pdu.SVC_READ, ber.tlv(0xA1, ber.tlv(0x80, b"\x63")))
         self.assertEqual(pdu.decode_read_response(resp), [{"error": "error-99"}])
+
+
+class TestInitiateResponse(unittest.TestCase):
+    def test_decode_negotiated_limits(self):
+        """What an SEL-451 answers: a 12000-byte MMS ceiling, 3 outstanding."""
+        body = (ber.tlv(0x80, b"\x2e\xe0")          # localDetailCalled = 12000
+                + ber.int_tlv(0x81, 3)
+                + ber.int_tlv(0x82, 3)
+                + ber.int_tlv(0x83, 5)
+                + ber.tlv(0xA4, b""))                # mmsInitResponseDetail, ignored
+        self.assertEqual(
+            pdu.decode_initiate_response(ber.tlv(pdu.INITIATE_RESPONSE, body)),
+            {"localDetailCalled": 12000, "maxServOutstandingCalling": 3,
+             "maxServOutstandingCalled": 3, "dataStructureNestingLevel": 5})
+
+    def test_every_field_is_optional(self):
+        self.assertEqual(
+            pdu.decode_initiate_response(ber.tlv(pdu.INITIATE_RESPONSE, b"")), {})
 
 
 class TestGetVariableAccessAttributes(unittest.TestCase):

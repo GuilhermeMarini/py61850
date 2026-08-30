@@ -109,6 +109,36 @@ def build_initiate() -> bytes:
     return ber.tlv(INITIATE_REQUEST, body)
 
 
+def decode_initiate_response(mms: bytes) -> dict:
+    """initiate-ResponsePDU [9] -> the limits the peer negotiated.
+
+    Keys (all optional on the wire, absent ones are simply missing):
+    ``localDetailCalled`` -- the largest MMS PDU the *server* will accept, in
+    bytes; ``maxServOutstandingCalling`` / ``maxServOutstandingCalled`` --
+    how many confirmed requests may be in flight each way;
+    ``dataStructureNestingLevel``.
+
+    ``localDetailCalled`` is an MMS-level ceiling and has nothing to do with the
+    COTP TPDU size: a relay commonly answers 12000 here while negotiating a
+    1024-byte TPDU, and a batching client has to respect both.
+    """
+    _, body, _ = ber.read_tlv(mms, 0)
+    fields = {}
+    for t, v in ber.iter_tlv(body):
+        name = _INITIATE_RESPONSE_FIELDS.get(t)
+        if name is not None and v:
+            fields[name] = ber.to_int(v)
+    return fields
+
+
+_INITIATE_RESPONSE_FIELDS = {
+    0x80: "localDetailCalled",
+    0x81: "maxServOutstandingCalling",
+    0x82: "maxServOutstandingCalled",
+    0x83: "dataStructureNestingLevel",
+}
+
+
 # ==== GetNameList =========================================================
 def build_get_name_list(object_class: int, scope: str, domain=None,
                         continue_after=None) -> bytes:
@@ -139,10 +169,43 @@ def decode_name_list(service_bytes: bytes):
 
 
 # ==== Read ================================================================
+def read_entry(domain: str, item: str) -> bytes:
+    """One ``listOfVariable`` entry: SEQUENCE { variableSpecification name [0] }.
+
+    ``listOfVariable`` is ``[0] IMPLICIT SEQUENCE OF SEQUENCE { ... }``, so N
+    variables means this TLV repeated N times -- *not* one SEQUENCE holding N
+    names. Getting that wrong is quiet: a relay accepts the malformed PDU and
+    answers with a single value.
+    """
+    return ber.tlv(0x30, ber.tlv(0xA0, object_name(domain, item)))
+
+
 def build_read(domain: str, item: str) -> bytes:
-    var = ber.tlv(0xA0, object_name(domain, item))         # variableSpecification name [0]
-    list_of_var = ber.tlv(0x30, var)                       # SEQUENCE OF { one entry }
-    spec = ber.tlv(0xA1, ber.tlv(0xA0, list_of_var))       # varAccessSpec [1]{ listOfVariable [0] }
+    """Read one variable of a domain."""
+    return build_read_multi(domain, (item,))
+
+
+def build_read_multi(domain: str, items) -> bytes:
+    """Read N variables of one domain in a single request.
+
+    The response is one ``listOfAccessResult`` in the same order,
+    :func:`decode_read_response` returns it as a list. Size the batch against
+    the negotiated limits (:func:`decode_initiate_response`) -- the request
+    itself is one MMS PDU however many variables it names.
+    """
+    entries = b"".join(read_entry(domain, it) for it in items)
+    spec = ber.tlv(0xA1, ber.tlv(0xA0, entries))           # varAccessSpec [1]{ listOfVariable [0] }
+    return ber.tlv(SVC_READ, spec)
+
+
+def build_read_named_list(domain: str, name: str) -> bytes:
+    """Read a whole named variable list (DataSet) by name.
+
+    The other arm of VariableAccessSpecification: ``variableListName [1]
+    ObjectName``. ObjectName is a CHOICE, so its tag is explicit -- [1] wraps
+    the domain-specific [1] SEQUENCE rather than replacing its tag.
+    """
+    spec = ber.tlv(0xA1, ber.tlv(0xA1, object_name(domain, name)))
     return ber.tlv(SVC_READ, spec)
 
 

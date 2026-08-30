@@ -24,9 +24,17 @@ from .services.read import ReadMixin
 class MmsClientBase:
     """Association + confirmed-service transactions. No services of its own."""
 
+    #: MMS PDU ceiling assumed until the peer tells us its own, in bytes.
+    DEFAULT_MAX_PDU_SIZE = 1024
+
     def __init__(self, host, port=102, timeout=10):
         self.t = CotpTransport(host, port, timeout=timeout)
         self.invoke = 0
+        # Negotiated in connect(); read-only for callers. max_pdu_size is the
+        # largest request the server accepts (its localDetailCalled), which is
+        # what a batching read has to size itself against -- see read_many.
+        self.max_pdu_size = self.DEFAULT_MAX_PDU_SIZE
+        self.max_outstanding = 1
 
     def __enter__(self):
         self.connect()
@@ -42,6 +50,10 @@ class MmsClientBase:
         mms = stack.extract_mms_from_response(self.t.recv())
         if mms[0] != pdu.INITIATE_RESPONSE:
             raise MmsError(f"association failed, MMS tag 0x{mms[0]:02x}")
+        limits = pdu.decode_initiate_response(mms)
+        self.max_pdu_size = limits.get("localDetailCalled",
+                                       self.DEFAULT_MAX_PDU_SIZE)
+        self.max_outstanding = limits.get("maxServOutstandingCalling", 1)
         return mms
 
     def close(self):

@@ -40,6 +40,19 @@ with MmsClient("192.0.2.22", timeout=10) as c:      # connects; closes on exit
         print(c.read_value(ld, "LLN0$ST$Beh$stVal"))   # decoded Python value
 ```
 
+Polling many values — one Read may name many variables, so a poll loop costs one
+request per batch, not one per point. The batch is sized against the PDU limit
+the server negotiated at association time:
+
+```python
+with MmsClient("192.0.2.22") as c:
+    bits = [f"ACN1GGIO1$ST$Ind{i}$stVal" for i in range(1, 65)]
+    values = c.read_many("MYLD_ANN", bits)          # decoded, in order
+
+    for ds in c.get_data_set_directory("MYLD_ANN"): # predefined DataSets
+        print(ds, c.read_data_set("MYLD_ANN", ds))  # a whole set in one request
+```
+
 Logical nodes — MMS answers with the LD's whole flattened variable list, so the
 client reduces it back to the LN level and filters it there:
 

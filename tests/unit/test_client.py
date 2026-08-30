@@ -99,6 +99,22 @@ class TestAssociation(unittest.TestCase):
             pass
         self.assertTrue(c.t.closed)
 
+    def test_connect_keeps_the_negotiated_limits(self):
+        """The Initiate-Response carries the ceilings a batching read needs;
+        nothing else in the client can discover them."""
+        body = (ber.tlv(0x80, b"\x2e\xe0")           # localDetailCalled = 12000
+                + ber.int_tlv(0x81, 3) + ber.int_tlv(0x82, 3))
+        c = MmsClient("192.0.2.1")
+        c.t = FakeTransport([ber.tlv(pdu.INITIATE_RESPONSE, body)])
+        c.connect()
+        self.assertEqual(c.max_pdu_size, 12000)
+        self.assertEqual(c.max_outstanding, 3)
+
+    def test_silent_initiate_response_leaves_conservative_defaults(self):
+        c = make_client(MmsClient, [])                 # associates with an empty PDU
+        self.assertEqual(c.max_pdu_size, MmsClient.DEFAULT_MAX_PDU_SIZE)
+        self.assertEqual(c.max_outstanding, 1)
+
     def test_invoke_id_increments_per_transaction(self):
         c = make_client(MmsClient, [name_list(["LD0"]), name_list(["A"])])
         c.get_server_directory()
@@ -183,6 +199,19 @@ class TestLogicalNodes(unittest.TestCase):
         self.assertEqual(len(c.t.requests()), 1)      # no GetServerDirectory
 
 
+def _names_of(read_request):
+    """The itemIds a read [4] request names, in wire order."""
+    _, spec, _ = ber.read_tlv(read_request, 0)          # unwrap 0xA4
+    _, access, _ = ber.read_tlv(spec, 0)                # varAccessSpec [1]
+    _, entries, _ = ber.read_tlv(access, 0)             # listOfVariable [0]
+    out = []
+    for _, entry in ber.iter_tlv(entries):              # SEQUENCE per variable
+        _, name, _ = ber.read_tlv(entry, 0)             # variableSpecification [0]
+        _, obj, _ = ber.read_tlv(name, 0)               # domain-specific [1]
+        out.append([v for _, v in ber.iter_tlv(obj)][-1].decode())
+    return out
+
+
 class TestReadServices(unittest.TestCase):
     def test_read_value(self):
         svc = ber.tlv(pdu.SVC_READ, ber.tlv(0xA1, d.encode_boolean(True)))
@@ -194,6 +223,45 @@ class TestReadServices(unittest.TestCase):
     def test_read_value_of_empty_response(self):
         c = make_client(MmsClient, [response(ber.tlv(pdu.SVC_READ, b""))])
         self.assertIsNone(c.read_value("LD0", "X"))
+
+    def test_read_many_is_one_request(self):
+        svc = ber.tlv(pdu.SVC_READ, ber.tlv(
+            0xA1, d.encode_boolean(True) + d.encode_integer(7)))
+        c = make_client(MmsClient, [response(svc)])
+        self.assertEqual(c.read_many("LD0", ["A$ST$X$stVal", "A$ST$Y$stVal"]),
+                         [True, 7])
+        self.assertEqual(len(c.t.requests()), 1)
+        self.assertEqual(c.t.requests()[0],
+                         pdu.build_read_multi("LD0", ["A$ST$X$stVal",
+                                                      "A$ST$Y$stVal"]))
+
+    def test_read_many_splits_at_the_negotiated_pdu_size(self):
+        """Each batch must fit one MMS PDU; overshooting is not an error the
+        relay reports, it drops the association."""
+        items = [f"ACN1GGIO1$ST$Ind{i}$stVal" for i in range(40)]
+        one = ber.tlv(pdu.SVC_READ, ber.tlv(0xA1, d.encode_boolean(True)))
+        c = make_client(MmsClient, [response(one)] * 8)
+        c.max_pdu_size = 512                            # ~ 6 names per request
+        c.read_many("LD0", items)
+        sent = c.t.requests()
+        self.assertGreater(len(sent), 1)
+        self.assertLessEqual(max(len(r) for r in sent), 512)
+        # every name asked for exactly once, in order
+        names = [it for r in sent for it in _names_of(r)]
+        self.assertEqual(names, items)
+
+    def test_read_many_of_nothing_sends_nothing(self):
+        c = make_client(MmsClient, [])
+        self.assertEqual(c.read_many("LD0", []), [])
+        self.assertEqual(c.t.requests(), [])
+
+    def test_read_data_set(self):
+        svc = ber.tlv(pdu.SVC_READ, ber.tlv(
+            0xA1, d.encode_boolean(False) + d.encode_integer(2)))
+        c = make_client(MmsClient, [response(svc)])
+        self.assertEqual(c.read_data_set("LD0", "BRDSet01"), [False, 2])
+        self.assertEqual(c.t.requests()[0],
+                         pdu.build_read_named_list("LD0", "BRDSet01"))
 
     def test_service_error_surfaces_as_mms_error(self):
         err = ber.tlv(pdu.CONFIRMED_ERROR,
