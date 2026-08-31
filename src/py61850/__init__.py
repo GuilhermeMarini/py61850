@@ -69,7 +69,7 @@ from .mms.services.files import folder_of
 from .mms.service_error import decode_service_error
 from .mms.types import decode_data_definition
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0.dev1"
 
 __all__ = [
     "MmsClient",
