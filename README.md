@@ -53,6 +53,15 @@ with MmsClient("192.0.2.22") as c:
         print(ds, c.read_data_set("MYLD_ANN", ds))  # a whole set in one request
 ```
 
+A poll list that spans logical devices takes `(ld, item)` pairs instead — the
+domain rides in each entry of the request, so one round trip can name several
+devices, and the values come back in the order you asked for them:
+
+```python
+    c.read_refs([("MYLD_ANN",  "ACN1GGIO1$ST$Ind1$stVal"),
+                 ("MYLD_PROT", "LLN0$ST$Beh$stVal")])
+```
+
 Logical nodes — MMS answers with the LD's whole flattened variable list, so the
 client reduces it back to the LN level and filters it there:
 

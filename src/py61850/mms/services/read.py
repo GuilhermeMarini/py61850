@@ -10,6 +10,9 @@
 One Read may name many variables, so a poll loop that wants N values should
 cost one request, not N.  :meth:`ReadMixin.read_many` batches them, splitting
 into as many requests as the association's negotiated MMS PDU size needs.
+:meth:`ReadMixin.read_refs` is the same batching over ``(ld, item)`` pairs, for
+a poll list that spans logical devices -- the domain rides in each entry, so
+one request may name several LDs.
 
 Batching, not pipelining, is the lever here.  Writing several requests before
 reading their responses was measured on an SEL-451 at ~3x *slower* (the
@@ -53,11 +56,28 @@ class ReadMixin:
         in place as ``{"error": <code-name>}``, so the result is always as long
         as ``items``.
         """
-        items = list(items)
+        return self.read_refs((ld, item) for item in items)
+
+    def read_refs(self, refs):
+        """Read ``(logical_device, item)`` pairs, decoded, in request order.
+
+            c.read_refs([("MYLD_ANN", "ACN1GGIO1$ST$Ind1$stVal"),
+                         ("MYLD_PROT", "LLN0$ST$Beh$stVal")])
+
+        The cross-device form of :meth:`read_many`: a poll list read from a
+        configuration names whole references, and grouping it by LD only to
+        stitch the values back into the caller's order is bookkeeping the
+        client can do. Batches still fit the negotiated PDU size; one batch
+        may name several LDs, which costs one round trip instead of one per
+        device. Each failed access appears in place as
+        ``{"error": <code-name>}``, so the result is always as long as
+        ``refs``.
+        """
+        refs = [(ld, item) for ld, item in refs]
         values = []
-        for group in self._read_batches(ld, items):
+        for group in self._read_batches(refs):
             values.extend(pdu.decode_read_response(
-                self._transact(pdu.build_read_multi(ld, group))))
+                self._transact(pdu.build_read_refs(group))))
         return values
 
     def read_data_set(self, ld, name):
@@ -74,21 +94,25 @@ class ReadMixin:
             self._transact(pdu.build_read_named_list(ld, name)))
 
     # ---- batching ---------------------------------------------------------
-    def _read_batches(self, ld, items):
-        """Split ``items`` into groups whose Read request fits one MMS PDU.
+    def _read_batches(self, refs):
+        """Split ``(ld, item)`` pairs into groups whose Read fits one MMS PDU.
 
         The budget is the *server's* limit (``max_pdu_size``, its
         localDetailCalled) -- the COTP TPDU size is a separate and usually
         smaller ceiling, but CotpTransport fragments across it on its own.
+
+        Pairs are grouped as given, never sorted by domain: the caller's order
+        is the order the values come back in, and re-ordering here would cost
+        more in bookkeeping than the odd extra entry saves.
         """
         budget = max(self.max_pdu_size - _REQUEST_OVERHEAD, 1)
         group, used = [], 0
-        for item in items:
+        for ld, item in refs:
             size = len(pdu.read_entry(ld, item))
             if group and used + size > budget:
                 yield group
                 group, used = [], 0
-            group.append(item)
+            group.append((ld, item))
             used += size
         if group:
             yield group

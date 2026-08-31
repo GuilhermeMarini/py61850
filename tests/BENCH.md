@@ -93,7 +93,28 @@ Issue #1 measured 170 bits at 170 requests / 739 ms, and predicted 12 requests /
 81 ms once batching works. Re-measure with `read_many` and record the real
 number in the ROADMAP entry.
 
-## 5. TCP_NODELAY
+## 5. Mixed-domain Read (`read_refs`)
+
+The ASN.1 puts ObjectName inside each `listOfVariable` entry, so one Read may
+name variables in different logical devices. Every capture we have repeats a
+single domain, so the mixed form has never been on the wire from here.
+
+```python
+with MmsClient("10.165.107.22") as c:
+    lds = c.get_server_directory()[:2]
+    print(c.read_refs([(ld, "LLN0$ST$Beh$stVal") for ld in lds]))
+```
+
+**Pass:** one value per pair, in the order asked, and one request on the wire
+(check with a capture, or by counting round trips).
+
+**Fail modes:** a per-entry `object-non-existent` is a wrong name, not the
+encoding — the entries are built by the same `read_entry` a single-domain read
+uses. An association drop or a PDU-level error on a request that works when
+split per LD would mean a server that only accepts one domain per Read; record
+it here and fall back to grouping in `read_refs`.
+
+## 6. TCP_NODELAY
 
 Set in `CotpTransport.connect()`, with the measured justification in a comment
 there (it was ~0.2 ms on a single read, never a loss). Nothing to verify beyond

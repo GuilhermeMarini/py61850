@@ -206,8 +206,8 @@ class TestLogicalNodes(unittest.TestCase):
         self.assertEqual(len(c.t.requests()), 1)      # no GetServerDirectory
 
 
-def _names_of(read_request):
-    """The itemIds a read [4] request names, in wire order."""
+def _refs_of(read_request):
+    """The (domainId, itemId) pairs a read [4] request names, in wire order."""
     _, spec, _ = ber.read_tlv(read_request, 0)          # unwrap 0xA4
     _, access, _ = ber.read_tlv(spec, 0)                # varAccessSpec [1]
     _, entries, _ = ber.read_tlv(access, 0)             # listOfVariable [0]
@@ -215,8 +215,14 @@ def _names_of(read_request):
     for _, entry in ber.iter_tlv(entries):              # SEQUENCE per variable
         _, name, _ = ber.read_tlv(entry, 0)             # variableSpecification [0]
         _, obj, _ = ber.read_tlv(name, 0)               # domain-specific [1]
-        out.append([v for _, v in ber.iter_tlv(obj)][-1].decode())
+        dom, item = [v for _, v in ber.iter_tlv(obj)][-2:]
+        out.append((dom.decode(), item.decode()))
     return out
+
+
+def _names_of(read_request):
+    """The itemIds a read [4] request names, in wire order."""
+    return [item for _, item in _refs_of(read_request)]
 
 
 class TestReadServices(unittest.TestCase):
@@ -260,6 +266,34 @@ class TestReadServices(unittest.TestCase):
     def test_read_many_of_nothing_sends_nothing(self):
         c = make_client(MmsClient, [])
         self.assertEqual(c.read_many("LD0", []), [])
+        self.assertEqual(c.t.requests(), [])
+
+    def test_read_refs_names_several_devices_in_one_request(self):
+        svc = ber.tlv(pdu.SVC_READ, ber.tlv(
+            0xA1, d.encode_boolean(True) + d.encode_integer(7)))
+        c = make_client(MmsClient, [response(svc)])
+        refs = [("LD0", "A$ST$X$stVal"), ("LD1", "LLN0$ST$Beh$stVal")]
+        self.assertEqual(c.read_refs(refs), [True, 7])
+        self.assertEqual(len(c.t.requests()), 1)
+        self.assertEqual(c.t.requests()[0], pdu.build_read_refs(refs))
+        self.assertEqual(_refs_of(c.t.requests()[0]), refs)
+
+    def test_read_refs_splits_at_the_negotiated_pdu_size(self):
+        refs = [(f"LD{i % 3}", f"ACN1GGIO1$ST$Ind{i}$stVal") for i in range(40)]
+        one = ber.tlv(pdu.SVC_READ, ber.tlv(0xA1, d.encode_boolean(True)))
+        c = make_client(MmsClient, [response(one)] * 8)
+        c.max_pdu_size = 512
+        c.read_refs(refs)
+        sent = c.t.requests()
+        self.assertGreater(len(sent), 1)
+        self.assertLessEqual(max(len(r) for r in sent), 512)
+        # every pair asked for exactly once, in the caller's order
+        got = [pair for r in sent for pair in _refs_of(r)]
+        self.assertEqual(got, refs)
+
+    def test_read_refs_of_nothing_sends_nothing(self):
+        c = make_client(MmsClient, [])
+        self.assertEqual(c.read_refs([]), [])
         self.assertEqual(c.t.requests(), [])
 
     def test_read_data_set(self):

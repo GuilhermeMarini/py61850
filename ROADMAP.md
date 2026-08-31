@@ -63,7 +63,11 @@ Make the client dependable enough for unattended fleet jobs to build on.
       bytes of MMS PDU over a 1024-byte TPDU — and a batching client owes both.
 - ✅ Multi-variable Read and DataSet Read (`read_many`, `read_data_set`).
       Reading a 170-bit logic diagram one variable at a time is 170 requests;
-      batched against the negotiated PDU size it is ~12.
+      batched against the negotiated PDU size it is ~12. `read_refs` batches
+      `(ld, item)` pairs the same way, so a poll list spanning logical devices
+      is one request rather than one per device — the saving is `(K-1) x RTT`
+      for K devices, which is noise on a LAN and real on a slow link; the
+      point is that callers no longer group by LD and re-order the results.
 - 🔜 `write` / `SetDataValues` (MMS Write) — currently read-only.
       Add as `mms/services/write.py`; `core.data.encode_data` is already there.
 - 🔜 `MmsClientPool` — per-thread/pooled clients so a web/GUI app can serve

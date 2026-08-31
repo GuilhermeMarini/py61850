@@ -200,7 +200,19 @@ def build_read_multi(domain: str, items) -> bytes:
     the negotiated limits (:func:`decode_initiate_response`) -- the request
     itself is one MMS PDU however many variables it names.
     """
-    entries = b"".join(read_entry(domain, it) for it in items)
+    return build_read_refs((domain, it) for it in items)
+
+
+def build_read_refs(refs) -> bytes:
+    """Read N variables that may span domains, from ``(domain, item)`` pairs.
+
+    ObjectName sits inside each ``listOfVariable`` entry, not above the list,
+    so naming two logical devices in one Read is the same encoding as naming
+    one twice -- :func:`build_read_multi` is this function with the domain
+    held constant. The response is still one ``listOfAccessResult`` in
+    request order.
+    """
+    entries = b"".join(read_entry(dom, it) for dom, it in refs)
     spec = ber.tlv(0xA1, ber.tlv(0xA0, entries))           # varAccessSpec [1]{ listOfVariable [0] }
     return ber.tlv(SVC_READ, spec)
 
