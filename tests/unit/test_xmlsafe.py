@@ -63,6 +63,24 @@ class TestRejectFile(unittest.TestCase):
     def test_a_clean_file_passes(self):
         _xmlsafe.reject_dtd_in_file(self._write(_CLEAN))
 
+    def test_a_doctype_behind_a_large_comment_is_still_found(self):
+        # The file reader needs its own version of the bytes test above, and
+        # a mutation check is what proved it: turning the file scan into a
+        # fixed 4 kB window left the in-memory test passing, because that one
+        # hands the whole document over at once. Only the streaming reader
+        # can be fooled by a prolog longer than its window.
+        padded = (b'<?xml version="1.0"?>\n<!--' + b'x' * 500_000 + b'-->\n'
+                  + _BILLION_LAUGHS.split(b'\n', 1)[1])
+        with self.assertRaises(_xmlsafe.DtdNotAllowed):
+            _xmlsafe.reject_dtd_in_file(self._write(padded))
+
+    def test_the_scan_stops_at_the_root_and_does_not_read_the_body(self):
+        # It reads the PROLOG, not the document: a 22 MB SCD must not be read
+        # end to end just to check its first line.
+        big = _CLEAN.replace(b"</SCL>", b"<Junk/>" * 200_000 + b"</SCL>")
+        self.assertGreater(len(big), 1_000_000)
+        _xmlsafe.reject_dtd_in_file(self._write(big))   # must not raise
+
 
 class TestErrorTree(unittest.TestCase):
     def test_it_is_both_an_scl_error_and_a_value_error(self):

@@ -63,12 +63,15 @@ class LogicalNode:
     type, its datasets, its privates).
     """
 
-    __slots__ = ("element", "ldevice", "ln_class", "prefix", "inst",
+    __slots__ = ("element", "ldevice", "ied", "ln_class", "prefix", "inst",
                  "ln_type", "desc", "is_ln0", "privates", "_cache")
 
-    def __init__(self, el, ldevice, is_ln0=False):
+    def __init__(self, el, ldevice, is_ln0=False, ied=None):
         self.element = el
+        #: The LDevice this LN is served from, or ``None`` for one declared
+        #: straight under an ``AccessPoint``. See :attr:`reference`.
         self.ldevice = ldevice
+        self.ied = ied if ldevice is None else ldevice.ied
         self.ln_class = el.get("lnClass") or ("LLN0" if is_ln0 else "")
         self.prefix = el.get("prefix") or ""
         self.inst = el.get("inst") or ""
@@ -84,8 +87,17 @@ class LogicalNode:
         return _ln_name(self.prefix, self.ln_class, self.inst)
 
     @property
-    def reference(self) -> str:
-        """``LDName/LNName``."""
+    def reference(self):
+        """``LDName/LNName``, or ``None`` for an access-point-level LN.
+
+        ``None`` is not a failure: an LN declared directly under an
+        ``AccessPoint`` sits in no logical device, so it has no MMS domain
+        and 61850-6 gives it no ``LDName/LNName`` reference to return. It is
+        still a real logical node with a type, inputs and privates -- see
+        :attr:`AccessPoint.logical_nodes`.
+        """
+        if self.ldevice is None:
+            return None
         return f"{self.ldevice.ld_name}/{self.name}"
 
     @property
@@ -99,7 +111,7 @@ class LogicalNode:
         """
         dos = self._cache.get("data_objects")
         if dos is None:
-            pool = self.ldevice.ied.document.templates
+            pool = self.ied.document.templates
             spec = pool.lnode_type(self.ln_type)
             dos = self._cache["data_objects"] = {}
             if spec is not None:
@@ -204,7 +216,7 @@ class Server:
 
 
 class AccessPoint:
-    """One ``AccessPoint``. ``server`` is ``None`` when it hosts none.
+    """One ``AccessPoint``: a ``Server``, and any LNs declared beside it.
 
     An IED may have several -- 41 across 30 IEDs in one reference SCD -- and an
     access point without a Server is normal: it may delegate to a sibling
@@ -217,19 +229,37 @@ class AccessPoint:
     rather than "no Server, full stop" -- a consumer that needs the
     delegation resolved still has to read ``<ServerAt>`` off ``element``
     itself.
+
+    ``logical_nodes`` holds the LNs 61850-6 allows DIRECTLY under an access
+    point, outside any ``Server``. They are how a gateway or proxy declares
+    the interface it presents -- an ``ITCI`` for a telecontrol interface, an
+    ``IHMI`` for an operator one -- and they are real logical nodes: they
+    carry a type, privates, and their own ``Inputs``. What they do not carry
+    is a logical device, so they have no MMS domain and no
+    ``LDName/LNName`` reference; :attr:`LogicalNode.reference` is ``None``
+    for them.
+
+    Measured on the reference corpus: exactly one, the ``ITCI`` on the RTAC
+    gateway's ``C1`` access point in the SEL station, and it holds 58 bound
+    ``ExtRef`` entries -- a quarter of that station's subscriptions.  Before
+    they were modelled, ``Ied.ext_refs()`` claimed to return every ExtRef in
+    the IED and returned 1,290 of that gateway's 1,348.
     """
 
-    __slots__ = ("element", "name", "server", "privates")
+    __slots__ = ("element", "name", "server", "logical_nodes", "privates")
 
     def __init__(self, el, ied):
         self.element = el
         self.name = el.get("name") or ""
         server_el = next(children_local(el, "Server"), None)
         self.server = Server(server_el, ied) if server_el is not None else None
+        self.logical_nodes = [LogicalNode(n, None, ied=ied)
+                              for n in children_local(el, "LN")]
         self.privates = privates_of(el)
 
     def __repr__(self):
-        return f"<AccessPoint {self.name!r} server={self.server is not None}>"
+        return (f"<AccessPoint {self.name!r} server={self.server is not None} "
+                f"lns={len(self.logical_nodes)}>")
 
 
 class Ied:
@@ -282,8 +312,18 @@ class Ied:
                 for ld in ap.server.ldevices]
 
     def logical_nodes(self) -> list:
-        """Every logical node in the IED, in document order."""
-        return [n for ld in self.ldevices() for n in ld.logical_nodes]
+        """Every logical node in the IED, in document order.
+
+        The LDevices' nodes first, then the ones declared directly under an
+        access point. The access-point ones come last rather than in strict
+        document order because they are the exception: a consumer walking
+        this list is almost always after the servable model, and the
+        handful that answer :attr:`LogicalNode.reference` with ``None``
+        are better met at the end than interleaved.
+        """
+        nodes = [n for ld in self.ldevices() for n in ld.logical_nodes]
+        nodes.extend(n for ap in self.access_points for n in ap.logical_nodes)
+        return nodes
 
     def ldevice(self, inst):
         """The LDevice with this ``inst``, or ``None``."""
@@ -358,9 +398,18 @@ class DataAttribute:
         """``CSWI1$CO$Pos$Oper$ctlVal`` -- the 61850-8-1 name."""
         return _mms_item(self.logical_node.name, self.fc or "", self.path)
 
-    def reference(self) -> str:
-        """``QPC1PRO/CSWI1.Pos.Oper.ctlVal`` -- the 61850-6 object reference."""
-        return _object_reference(self.logical_node.ldevice.ld_name,
+    def reference(self):
+        """``QPC1PRO/CSWI1.Pos.Oper.ctlVal`` -- the 61850-6 object reference.
+
+        ``None`` when the logical node is not in a logical device, which is
+        the access-point-level case: there is no MMS domain to name it in.
+        :meth:`mms_item` is unaffected -- it names the attribute within its
+        LN and never needed the domain.
+        """
+        ldevice = self.logical_node.ldevice
+        if ldevice is None:
+            return None
+        return _object_reference(ldevice.ld_name,
                                  self.logical_node.name, self.path)
 
     def walk(self):
@@ -395,7 +444,7 @@ class DataObject:
         self.attributes = {}
         self.sub_objects = {}
         self.privates = privates_of(doi_el) if doi_el is not None else {}
-        pool = logical_node.ldevice.ied.document.templates
+        pool = logical_node.ied.document.templates
         spec = pool.do_type(do_type_id)
         if spec is None:
             self.cdc = None
@@ -424,8 +473,13 @@ class DataObject:
                 yield item
 
     @property
-    def reference(self) -> str:
-        return _object_reference(self.logical_node.ldevice.ld_name,
+    def reference(self):
+        """``None`` for an access-point-level LN; see
+        :meth:`DataAttribute.reference`."""
+        ldevice = self.logical_node.ldevice
+        if ldevice is None:
+            return None
+        return _object_reference(ldevice.ld_name,
                                  self.logical_node.name, self.path)
 
     def __repr__(self):
