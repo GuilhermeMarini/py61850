@@ -127,5 +127,18 @@ class TestCaching(_Base):
         self.assertIs(d.communication, d.communication)
 
 
+class TestPrivateLookalike(_Base):
+    def test_a_private_communication_lookalike_does_not_shadow_the_real_one(self):
+        # Same class of bug commit 671bb35 fixed for <IED>: a Private is
+        # free to nest a same-named element, <Communication> included.
+        decoy = fx.private(
+            "Vendor-Thing",
+            "<Communication>" + fx.subnetwork("DECOY") + "</Communication>")
+        real = fx.communication(fx.subnetwork("REAL"))
+        d = self.doc(decoy, real)
+        self.assertEqual([sn.name for sn in d.communication.subnetworks],
+                         ["REAL"])
+
+
 if __name__ == "__main__":
     unittest.main()

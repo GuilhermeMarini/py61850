@@ -159,7 +159,10 @@ class SclDocument:
     def header(self):
         """The ``<Header>``, or ``None`` when the file carries none."""
         if self._header is False:
-            el = next(iter_local(self.root, "Header"), None)
+            # DIRECT CHILD of the root only -- see `_ied_elements`'s docstring
+            # for why descendant matching is unsafe here: a vendor `Private`
+            # block is free to nest an element with this same local name.
+            el = next(children_local(self.root, "Header"), None)
             self._header = Header(el) if el is not None else None
         return self._header
 

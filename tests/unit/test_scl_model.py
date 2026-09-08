@@ -110,6 +110,20 @@ class TestIed(_Base):
             body=fx.ldevice("PRO", body=fx.ln0()))))
         self.assertIs(d.ied("A"), d.ied("A"))
 
+    def test_a_private_access_point_lookalike_does_not_shadow_the_real_one(self):
+        # Same class of bug as the decoy <IED> above, one level down: a
+        # vendor Private is free to nest an <AccessPoint>-shaped element too,
+        # and an IED's own Private blocks are exactly where DIGSI already
+        # nests device-shaped elements. Descendant matching would find the
+        # decoy -- with no Server -- ahead of the real, populated one.
+        decoy = fx.private("Vendor-Thing",
+                           '<AccessPoint name="DECOY"/>')
+        real = fx.access_point("REAL", body=fx.ldevice("PRO", body=fx.ln0()))
+        d = self.doc(fx.ied("A", body=decoy + real))
+        ied = d.ied("A")
+        self.assertEqual([ap.name for ap in ied.access_points], ["REAL"])
+        self.assertEqual([ld.inst for ld in ied.ldevices()], ["PRO"])
+
 
 class TestLDevice(_Base):
     def test_ld_name_defaults_to_ied_name_plus_inst(self):

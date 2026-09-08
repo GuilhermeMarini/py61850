@@ -140,7 +140,12 @@ class Communication:
 
     def __init__(self, root):
         self.subnetworks = []
-        for section in iter_local(root, "Communication"):
+        # DIRECT CHILD of the root only. `<Communication>` is schema-valid
+        # only there; a descendant scan would also match a same-named element
+        # a vendor `Private` block happens to nest -- see `_ied_elements`'s
+        # docstring in `document.py` for the shadowing this class of bug
+        # already caused once, for `<IED>`.
+        for section in children_local(root, "Communication"):
             self.subnetworks.extend(
                 SubNetwork(sn) for sn in children_local(section, "SubNetwork"))
 

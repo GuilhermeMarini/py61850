@@ -23,7 +23,7 @@ from ..core.refs import ld_name as _ld_name
 from ..core.refs import ln_name as _ln_name
 from ..core.refs import mms_item as _mms_item
 from ..core.refs import object_reference as _object_reference
-from .document import children_local, iter_local, privates_of, strip_ns
+from .document import children_local, privates_of, strip_ns
 
 
 class IedHeader:
@@ -233,8 +233,15 @@ class Ied:
         self.element = el
         self.document = document
         self.header = IedHeader(el)
+        # DIRECT CHILDREN only -- not `iter_local`'s descendant search.
+        # `<AccessPoint>` is schema-valid only directly under `<IED>`, and an
+        # IED's `Private` blocks are exactly where DIGSI already nests
+        # device-shaped elements (see `document._ied_elements`'s docstring
+        # for the decoy `<IED>` this same shape of bug produced once); a
+        # descendant scan here would be one more thing a vendor `Private`
+        # could shadow.
         self.access_points = [AccessPoint(ap, self)
-                              for ap in iter_local(el, "AccessPoint")]
+                              for ap in children_local(el, "AccessPoint")]
 
     # the header's fields, readable straight off the IED
     @property

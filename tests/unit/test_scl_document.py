@@ -91,6 +91,18 @@ class TestHeader(_TmpMixin):
     def test_a_document_with_no_header_gives_none(self):
         self.assertIsNone(self.doc(fx.scl(fx.ied("IED1"))).header)
 
+    def test_a_private_header_lookalike_does_not_shadow_the_real_one(self):
+        # Same class of bug commit 671bb35 fixed for <IED>: a vendor Private
+        # is free to nest an element sharing any local name, <Header>
+        # included, and it may sit before the real element in document
+        # order -- teste_siemens.scd has five root-level <Private> elements
+        # ahead of its <Header>.
+        decoy = fx.private("Vendor-Thing",
+                           '<Header id="DECOY" version="9" revision="9"/>')
+        real = fx.header(id_="REAL", version="1", revision="0")
+        d = self.doc(fx.scl(decoy, real))
+        self.assertEqual(d.header.id, "REAL")
+
 
 class TestPrivates(_TmpMixin):
     def test_document_level_privates_are_grouped_by_type(self):

@@ -137,6 +137,18 @@ class TestStructs(_Base):
         self.assertIn("b", attr.sub_specs)
         self.assertEqual(attr.sub_specs["b"].sub_specs, {})
 
+    def test_a_private_datatypetemplates_lookalike_does_not_shadow_the_real_one(self):
+        # Same class of bug commit 671bb35 fixed for <IED>: a Private is
+        # free to nest a same-named element, <DataTypeTemplates> included.
+        decoy = fx.private(
+            "Vendor-Thing",
+            "<DataTypeTemplates>" + fx.lnode_type("DECOY", "CSWI")
+            + "</DataTypeTemplates>")
+        real = fx.templates(fx.lnode_type("REAL", "CSWI"))
+        d = _doc(self.tmpdir, decoy, real)
+        self.assertIsNone(d.templates.lnode_type("DECOY"))
+        self.assertIsNotNone(d.templates.lnode_type("REAL"))
+
 
 if __name__ == "__main__":
     unittest.main()

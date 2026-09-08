@@ -23,7 +23,7 @@ overrides a value is the instance model's business, not this module's.
 
 from __future__ import annotations
 
-from .document import children_local, iter_local, privates_of
+from .document import children_local, privates_of
 
 # A DAType that references itself, directly or through a cycle, is malformed
 # but reachable -- expansion stops at this depth rather than exhausting the
@@ -107,7 +107,12 @@ class TemplatePool:
         self._build(root)
 
     def _build(self, root):
-        for section in iter_local(root, "DataTypeTemplates"):
+        # DIRECT CHILD of the root only -- `<DataTypeTemplates>` is
+        # schema-valid only there, and a descendant scan would also pick up
+        # any same-named element a vendor `Private` block happens to nest.
+        # See `document._ied_elements`'s docstring for the shadowing this
+        # already caused once, for `<IED>`.
+        for section in children_local(root, "DataTypeTemplates"):
             for el in children_local(section, "EnumType"):
                 self._enum_types[el.get("id")] = _enum_values(el)
             for el in children_local(section, "DAType"):
