@@ -20,6 +20,11 @@ subscriber and a publisher (GOOSE/SV), and be unit-tested offline.
     quality   the IEC 61850 13-bit Quality bitstring
     time      MMS ``UtcTime`` / ``BinaryTime``
 
-Import these from ``py61850.core.<module>``; they are internal to the package
-and may change between releases.
+Most of this is internal and may change between releases. The exception is
+what the top level re-exports -- ``FUNCTIONAL_CONSTRAINTS``,
+``CONTROL_DATA_ATTRIBUTES``, ``fc_is_control``, ``fc_is_control_attribute``,
+``fc_read_rank``, ``mms_item``, ``object_reference``, ``split_item`` and
+``da_parts``. Those are public API and are reached as ``py61850.<name>``; the
+rest is reached as ``py61850.core.<module>.<name>`` and carries no such
+promise.
 """

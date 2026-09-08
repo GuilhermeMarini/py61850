@@ -86,7 +86,7 @@ from .core.fc import CONTROL_DATA_ATTRIBUTES, FUNCTIONAL_CONSTRAINTS, \
     read_rank as fc_read_rank
 from .core.refs import da_parts, mms_item, object_reference, split_item
 
-__version__ = "0.3.0.dev2"
+__version__ = "0.3.0"
 
 __all__ = [
     "MmsClient",

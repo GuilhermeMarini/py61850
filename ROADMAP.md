@@ -111,6 +111,10 @@ Make the client dependable enough for unattended fleet jobs to build on.
       documented read-preference ranking. In `core` rather than `scl` because
       a client matching items against `GetLogicalDeviceDirectory` needs the
       same vocabulary as a reader walking a file.
+- ✅ `core/fc.py` also carries the control model's own data attributes
+      (`Oper`, `SBOw`, `SBO`, `Cancel`) and `is_control_attribute`, which asks
+      "command or reading?" of an attribute NAME. Both directions are needed:
+      an attribute path is often in hand when its FC is not.
 - ✅ `core/refs.py` — object reference ↔ MMS domain and item name (61850-8-1).
 - ✅ `scl/` — see 1.0 below.
 
@@ -137,6 +141,17 @@ image of today's client.
 
       Not modelled, because no file in the reference corpus carries them: the
       `Substation` section and `Log`.
+
+      **The vendor seam is proven by two unrelated vendors**, which is what
+      0.3.0 waited for rather than shipping on its author's word. Two
+      libraries outside this project were rebuilt on the model, sharing no
+      code with each other and neither written against it: one reads SEL's
+      `sAddr` value grammar (178,406 configured attributes in one station),
+      the other Siemens' `Private` elements (5,886 of a single type). Both
+      reproduce every field their own XML readers produced, on the same
+      files — one of which is a Siemens export containing SEL relays, read by
+      both without either opening it twice. Nothing was added to this package
+      for the second one.
 - 🧭 **Model → MMS server** — a listening `MmsServer` on TCP 102 that answers the
       confirmed services the client already speaks, driven by the SCL model:
       - Initiate / association (server side of `associate.py`)
