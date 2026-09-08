@@ -25,6 +25,9 @@ Public API
                    the 61850-7-2 functional constraints, shared by the SCL
                    reader and the live MMS path
 
+    mms_item / object_reference / split_item / da_parts
+                   61850-8-1 naming: object reference <-> MMS domain and item
+
     Iec61850Error  base of every error the library raises
       TransportError   TPKT/COTP/socket and OSI framing failures
       MmsError         MMS service errors, rejects, refused associations
@@ -74,6 +77,7 @@ from .mms.service_error import decode_service_error
 from .mms.types import decode_data_definition
 from .core.fc import FUNCTIONAL_CONSTRAINTS, is_control as fc_is_control, \
     read_rank as fc_read_rank
+from .core.refs import da_parts, mms_item, object_reference, split_item
 
 __version__ = "0.2.0.dev1"
 
@@ -86,6 +90,10 @@ __all__ = [
     "FUNCTIONAL_CONSTRAINTS",
     "fc_is_control",
     "fc_read_rank",
+    "mms_item",
+    "object_reference",
+    "split_item",
+    "da_parts",
     "Iec61850Error",
     "TransportError",
     "MmsError",
