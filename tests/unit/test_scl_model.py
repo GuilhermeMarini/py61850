@@ -95,8 +95,9 @@ class TestIed(_Base):
                          ["PRO", "ANN"])
 
     def test_an_ied_with_no_server_is_still_an_ied(self):
-        # Measured: one reference station has 28 IEDs and 14 Servers. A
-        # template or placeholder IED is normal and must not raise.
+        # An access point with no Server is normal -- it may delegate to a
+        # sibling access point's Server via ServerAt instead (see
+        # AccessPoint's docstring) -- and must not raise.
         d = self.doc(fx.ied("A", body=fx.access_point("S1", server=False)))
         ied = d.ied("A")
         self.assertEqual(ied.access_points[0].server, None)

@@ -207,8 +207,16 @@ class AccessPoint:
     """One ``AccessPoint``. ``server`` is ``None`` when it hosts none.
 
     An IED may have several -- 41 across 30 IEDs in one reference SCD -- and an
-    access point without a Server is normal: one reference station has 28 IEDs
-    and 14 Servers, the rest being templates.
+    access point without a Server is normal: it may delegate to a sibling
+    access point's Server via ``<ServerAt>`` instead of hosting one itself.
+    Measured on the reference corpus: of the access points with no Server,
+    10 of 11 in the SEL station and 12 of 12 in the mixed-vendor station
+    carry a ``ServerAt``; the Siemens station has none without a Server at
+    all (0 of 14). ``ServerAt`` is not yet modelled here, so ``server is
+    None`` on this class means "no Server, and possibly a ServerAt instead"
+    rather than "no Server, full stop" -- a consumer that needs the
+    delegation resolved still has to read ``<ServerAt>`` off ``element``
+    itself.
     """
 
     __slots__ = ("element", "name", "server", "privates")
