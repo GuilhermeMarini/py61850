@@ -246,8 +246,13 @@ class Ied:
         return f"<Ied {self.name!r} lds={len(self.ldevices())}>"
 
 
-# An SDO chain that references itself is malformed but reachable; expansion
-# stops here rather than exhausting the stack.
+# Cycle detection is the primary guard against a self-referencing SDO chain
+# -- see the `seen` frozenset threaded through DataObject.__init__, the same
+# shape as TemplatePool._attribute's `seen` for a self-referencing DAType.
+# _MAX_DO_DEPTH remains underneath as a backstop for a long chain of
+# DISTINCT types that never repeats, not as what stops a cycle: a bare depth
+# cap alone lets a DOType with three same-typed SDOs build 9,841 DataObject
+# instances from a single top-level DO before it gives up.
 _MAX_DO_DEPTH = 8
 
 
@@ -326,7 +331,7 @@ class DataObject:
                  "privates", "logical_node", "path")
 
     def __init__(self, name, do_type_id, logical_node, doi_el=None,
-                 path=(), depth=0):
+                 path=(), depth=0, seen=frozenset()):
         self.name = name
         self.logical_node = logical_node
         self.path = tuple(path) + (name,)
@@ -344,12 +349,14 @@ class DataObject:
             self.attributes[attr_name] = DataAttribute(
                 attr_spec, logical_node, self.path,
                 _child_instance(doi_el, attr_name))
-        if depth >= _MAX_DO_DEPTH:
+        if depth >= _MAX_DO_DEPTH or do_type_id in seen:
             return
+        next_seen = seen | {do_type_id}
         for sdo_name, sdo_type in spec.sub_objects.items():
             self.sub_objects[sdo_name] = DataObject(
                 sdo_name, sdo_type, logical_node,
-                _child_instance(doi_el, sdo_name), self.path, depth + 1)
+                _child_instance(doi_el, sdo_name), self.path, depth + 1,
+                next_seen)
 
     def walk(self):
         """Every attribute in this object and its sub-objects, depth first."""

@@ -280,6 +280,22 @@ class TestSubObjects(_DataBase):
         self.assertEqual(phs_a.cdc, "CMV")
         self.assertEqual(phs_a.attributes["q"].mms_item(), "MMXU1$MX$A$phsA$q")
 
+    def test_a_self_referencing_do_type_does_not_recurse_for_ever(self):
+        # Defensive: a malformed file can point an SDO at its own DOType.
+        # Expansion must stop after one level, not exhaust the stack.
+        d = self.doc(
+            fx.ied("Q", body=fx.access_point(body=fx.ldevice(
+                "MX", body=fx.ln0() + fx.ln("MMXU", inst="1",
+                                            ln_type="T_MMXU")))),
+            fx.templates(
+                fx.lnode_type("T_MMXU", "MMXU", dos=[("A", "DO_LOOP")]),
+                fx.do_type("DO_LOOP", cdc="WYE", sdos=[("child", "DO_LOOP")]),
+            ))
+        node = d.ied("Q").ldevices()[0].logical_nodes[1]
+        a = node.data_objects["A"]
+        self.assertIn("child", a.sub_objects)
+        self.assertEqual(a.sub_objects["child"].sub_objects, {})
+
 
 if __name__ == "__main__":
     unittest.main()
