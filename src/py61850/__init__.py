@@ -25,6 +25,11 @@ Public API
                    the 61850-7-2 functional constraints, shared by the SCL
                    reader and the live MMS path
 
+    CONTROL_DATA_ATTRIBUTES / fc_is_control_attribute
+                   the control model's own data attributes -- the same
+                   "command, not a reading" question asked of an attribute
+                   name rather than of an FC
+
     mms_item / object_reference / split_item / da_parts
                    61850-8-1 naming: object reference <-> MMS domain and item
 
@@ -75,7 +80,9 @@ from .mms.services.directory import LogicalNode
 from .mms.services.files import folder_of
 from .mms.service_error import decode_service_error
 from .mms.types import decode_data_definition
-from .core.fc import FUNCTIONAL_CONSTRAINTS, is_control as fc_is_control, \
+from .core.fc import CONTROL_DATA_ATTRIBUTES, FUNCTIONAL_CONSTRAINTS, \
+    is_control as fc_is_control, \
+    is_control_attribute as fc_is_control_attribute, \
     read_rank as fc_read_rank
 from .core.refs import da_parts, mms_item, object_reference, split_item
 
@@ -90,6 +97,8 @@ __all__ = [
     "FUNCTIONAL_CONSTRAINTS",
     "fc_is_control",
     "fc_read_rank",
+    "CONTROL_DATA_ATTRIBUTES",
+    "fc_is_control_attribute",
     "mms_item",
     "object_reference",
     "split_item",

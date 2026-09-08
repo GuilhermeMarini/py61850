@@ -36,6 +36,7 @@ class TestPublicApi(unittest.TestCase):
         self.assertEqual(sorted(py61850.__all__), sorted([
             "MmsClient", "FileTransfer", "DirEntry", "LogicalNode", "folder_of",
             "FUNCTIONAL_CONSTRAINTS", "fc_is_control", "fc_read_rank",
+            "CONTROL_DATA_ATTRIBUTES", "fc_is_control_attribute",
             "mms_item", "object_reference", "split_item", "da_parts",
             "Iec61850Error", "TransportError", "MmsError",
             "LinkError", "GooseError", "SvError", "SclError",

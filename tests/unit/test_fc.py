@@ -39,6 +39,49 @@ class TestControl(unittest.TestCase):
             self.assertFalse(fc.is_control(other), other)
 
 
+class TestControlDataAttributes(unittest.TestCase):
+    """The control model's own attributes -- the "is this a command?" question
+    asked of a NAME rather than of an FC."""
+
+    def test_the_7_2_control_attributes_are_present(self):
+        self.assertEqual(sorted(fc.CONTROL_DATA_ATTRIBUTES),
+                         ["Cancel", "Oper", "SBO", "SBOw"])
+
+    def test_a_control_root_makes_the_whole_descent_a_command(self):
+        # The FC belongs to the root DA, and so does this: everything under
+        # `Oper` is part of the command, not a reading of the point.
+        self.assertTrue(fc.is_control_attribute("Oper"))
+        self.assertTrue(fc.is_control_attribute("Oper.ctlVal"))
+        self.assertTrue(fc.is_control_attribute("SBOw.ctlNum"))
+        self.assertTrue(fc.is_control_attribute("Cancel.origin.orIdent"))
+
+    def test_both_spellings_of_the_descent(self):
+        # SCL writes an SDI descent with '.', MMS spells every level with '$'.
+        self.assertTrue(fc.is_control_attribute("Oper$ctlVal"))
+        self.assertEqual(fc.is_control_attribute("Oper$ctlVal"),
+                         fc.is_control_attribute("Oper.ctlVal"))
+
+    def test_parts_already_split_are_accepted(self):
+        self.assertTrue(fc.is_control_attribute(("Oper", "ctlVal")))
+
+    def test_a_bare_ctlval_leaf_is_a_command_without_its_root(self):
+        # This is the rule the root test does not cover: a consumer may hold
+        # the leaf alone, and `ctlVal` occurs nowhere but inside a control.
+        self.assertTrue(fc.is_control_attribute("ctlVal"))
+
+    def test_a_status_attribute_is_not_a_command(self):
+        for reading in ("stVal", "general", "phsA", "mag.f", "q", "t",
+                        "setVal", "dirGeneral"):
+            self.assertFalse(fc.is_control_attribute(reading), reading)
+
+    def test_an_empty_path_is_not_a_command(self):
+        # Refusing is the safe answer: an unknown shape must not be promoted
+        # into "this is a command" any more than into "this is a reading".
+        self.assertFalse(fc.is_control_attribute(""))
+        self.assertFalse(fc.is_control_attribute(None))
+        self.assertFalse(fc.is_control_attribute(()))
+
+
 class TestReadRank(unittest.TestCase):
     def test_status_beats_measurement_beats_config(self):
         self.assertLess(fc.read_rank("ST"), fc.read_rank("MX"))
