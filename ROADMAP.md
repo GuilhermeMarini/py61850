@@ -136,7 +136,7 @@ image of today's client.
       dataset in the same model.
 
       Not modelled, because no file in the reference corpus carries them: the
-      `Substation` section and `Log`/`LogControl`.
+      `Substation` section and `Log`.
 - 🧭 **Model → MMS server** — a listening `MmsServer` on TCP 102 that answers the
       confirmed services the client already speaks, driven by the SCL model:
       - Initiate / association (server side of `associate.py`)
