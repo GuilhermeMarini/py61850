@@ -28,9 +28,9 @@ have a name, "billion laughs".
 
 Refusing the whole construct is what makes the class gone rather than
 mitigated. It costs nothing, because SCL does not use DTDs -- IEC 61850
-validates against an XSD schema referenced by namespace. Measured over every
-SCL file reachable from the project this came from: **696 files, 0 with a
-DOCTYPE** (345 factory ICDs and 351 substation SCD/ICD/CID files).
+validates against an XSD schema referenced by namespace. Measured over a
+696-file corpus of factory ICDs and substation exports (345 factory ICDs
+and 351 substation SCD/ICD/CID files): **0 with a DOCTYPE**.
 
 Why a separate pass rather than a parser flag: ``xml.etree``'s C parser does
 not expose the expat instance underneath it, so there is no handler to install
