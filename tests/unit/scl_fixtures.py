@@ -85,3 +85,38 @@ def enum_type(id_, values=()):
     """`values` is a sequence of (ord, text)."""
     inner = "".join(f'<EnumVal ord="{o}">{t}</EnumVal>' for o, t in values)
     return f'<EnumType id="{id_}">{inner}</EnumType>'
+
+
+def address(**params):
+    """`<Address>` with one `<P type=...>` per keyword. Use `P_IP=...` style
+    keys; underscores in the key become dashes in the type."""
+    inner = "".join(f'<P type="{k.replace("_", "-")}">{v}</P>'
+                    for k, v in sorted(params.items()))
+    return f"<Address>{inner}</Address>"
+
+
+def gse(ld_inst, cb_name, addr="", min_time=None, max_time=None):
+    times = ""
+    if min_time is not None:
+        times += f'<MinTime unit="s" multiplier="m">{min_time}</MinTime>'
+    if max_time is not None:
+        times += f'<MaxTime unit="s" multiplier="m">{max_time}</MaxTime>'
+    return f'<GSE ldInst="{ld_inst}" cbName="{cb_name}">{addr}{times}</GSE>'
+
+
+def smv(ld_inst, cb_name, addr=""):
+    return f'<SMV ldInst="{ld_inst}" cbName="{cb_name}">{addr}</SMV>'
+
+
+def connected_ap(ied_name, ap_name="S1", body=""):
+    return (f'<ConnectedAP iedName="{ied_name}" apName="{ap_name}">'
+            f'{body}</ConnectedAP>')
+
+
+def subnetwork(name, aps=(), type_="8-MMS"):
+    return (f'<SubNetwork name="{name}" type="{type_}">'
+            + "".join(aps) + "</SubNetwork>")
+
+
+def communication(*subnets):
+    return "<Communication>" + "".join(subnets) + "</Communication>"

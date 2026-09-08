@@ -195,6 +195,19 @@ class SclDocument:
             pool = self._cache["templates"] = TemplatePool(self.root)
         return pool
 
+    @property
+    def communication(self):
+        """The document's :class:`~py61850.scl.communication.Communication`.
+
+        Built on first access and cached. It needs no type pool and no
+        instance tree: the section names IEDs but contains none of them.
+        """
+        comm = self._cache.get("communication")
+        if comm is None:
+            from .communication import Communication
+            comm = self._cache["communication"] = Communication(self.root)
+        return comm
+
     def __repr__(self) -> str:
         return f"<SclDocument path={self.path!r} edition={self.edition!r}>"
 
