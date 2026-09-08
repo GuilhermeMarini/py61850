@@ -105,15 +105,38 @@ Make the client dependable enough for unattended fleet jobs to build on.
 
 ---
 
+## 0.3 — The SCL model ✅
+
+- ✅ `core/fc.py` — the 13 functional constraints of 61850-7-2 and a
+      documented read-preference ranking. In `core` rather than `scl` because
+      a client matching items against `GetLogicalDeviceDirectory` needs the
+      same vocabulary as a reader walking a file.
+- ✅ `core/refs.py` — object reference ↔ MMS domain and item name (61850-8-1).
+- ✅ `scl/` — see 1.0 below.
+
+---
+
 ## 1.0 — MMS simulation 🧭
 
 **Goal:** read an SCL file (`.scd` / `.cid` / `.icd`) and stand up a virtual IED
 on the network that a real client/HMI can associate to and browse — the mirror
 image of today's client.
 
-- 🧭 **SCL parser** — `py61850.scl` (package reserved): parse IEDs, LDs, LNs, DOs, DAs,
-      DataSets, and Report/Setting control blocks from an SCL XML file into an
-      in-memory object model. (Shared by MMS-sim and GOOSE-sim below.)
+- ✅ **SCL parser** — `py61850.scl`: a general IEC 61850-6 object model.
+      `SclDocument` owns the file; `DataTypeTemplates` is resolved once per
+      document into a shared type pool; the instance tree
+      (IED → AccessPoint → Server → LDevice → LN → DO → DA, plus DataSets,
+      control blocks and ExtRefs) is built per IED on demand. Every node
+      exposes its `Private` elements, which is how a vendor library attaches
+      its own half without parsing the file again.
+
+      It landed ahead of the rest of 1.0 because it is the shared spine: the
+      MMS server answers GetNameList and GetVariableAccessAttributes out of
+      this model, and the GOOSE publisher builds frames from the GoCB and
+      dataset in the same model.
+
+      Not modelled, because no file in the reference corpus carries them: the
+      `Substation` section and `Log`.
 - 🧭 **Model → MMS server** — a listening `MmsServer` on TCP 102 that answers the
       confirmed services the client already speaks, driven by the SCL model:
       - Initiate / association (server side of `associate.py`)
