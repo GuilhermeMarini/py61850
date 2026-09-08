@@ -120,3 +120,22 @@ def subnetwork(name, aps=(), type_="8-MMS"):
 
 def communication(*subnets):
     return "<Communication>" + "".join(subnets) + "</Communication>"
+
+
+def ln(ln_class, inst="1", prefix="", ln_type="T", body=""):
+    return (f'<LN lnClass="{ln_class}" inst="{inst}" prefix="{prefix}" '
+            f'lnType="{ln_type}">{body}</LN>')
+
+
+def ln0(ln_type="T_LLN0", body=""):
+    return f'<LN0 lnClass="LLN0" inst="" lnType="{ln_type}">{body}</LN0>'
+
+
+def ldevice(inst, body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<LDevice inst="{inst}"{extra}>{body}</LDevice>'
+
+
+def access_point(name="S1", body="", server=True):
+    inner = f"<Server>{body}</Server>" if server else body
+    return f'<AccessPoint name="{name}">{inner}</AccessPoint>'

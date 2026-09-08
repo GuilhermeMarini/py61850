@@ -208,6 +208,60 @@ class SclDocument:
             comm = self._cache["communication"] = Communication(self.root)
         return comm
 
+    def _ied_elements(self) -> dict:
+        """``{name: <IED> element}``, in document order.
+
+        An IED with no name is skipped: nothing can reference it -- not a
+        ConnectedAP, not an ExtRef -- and keying it on ``""`` would collide
+        with the next unnamed one.
+        """
+        els = self._cache.get("ied_elements")
+        if els is None:
+            els = self._cache["ied_elements"] = {}
+            for el in iter_local(self.root, "IED"):
+                name = el.get("name")
+                if name and name not in els:
+                    els[name] = el
+        return els
+
+    @property
+    def ied_names(self) -> tuple:
+        """Every IED name, in document order."""
+        return tuple(self._ied_elements())
+
+    @property
+    def ied_headers(self) -> dict:
+        """``{name: IedHeader}`` -- identifying fields only, no instance tree.
+
+        This is the station-wide view: listing devices, cross-matching an
+        inventory, resolving an IP. It builds no logical nodes and touches no
+        type pool.
+        """
+        headers = self._cache.get("ied_headers")
+        if headers is None:
+            from .model import IedHeader
+            headers = self._cache["ied_headers"] = {
+                name: IedHeader(el) for name, el in self._ied_elements().items()}
+        return headers
+
+    def ied(self, name):
+        """The fully resolved :class:`~py61850.scl.model.Ied`, or ``None``.
+
+        Built on first request and cached. Per IED because that is the unit a
+        consumer works in, and because one reference SCD carries 178,406 DAI
+        elements across 30 IEDs -- materialising a station to serve one relay
+        spends the whole budget.
+        """
+        key = "ied:" + str(name)
+        if key in self._cache:
+            return self._cache[key]
+        el = self._ied_elements().get(name)
+        if el is None:
+            return None
+        from .model import Ied
+        self._cache[key] = Ied(el, self)
+        return self._cache[key]
+
     def __repr__(self) -> str:
         return f"<SclDocument path={self.path!r} edition={self.edition!r}>"
 
