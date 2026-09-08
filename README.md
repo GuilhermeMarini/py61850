@@ -13,6 +13,27 @@ TCP → TPKT (RFC1006) → COTP (ISO8073) → ISO Session → ISO Presentation
 See [ROADMAP.md](ROADMAP.md) for what's next (an MMS sniffer, MMS simulation
 from SCL, and a GOOSE sniff/publish interface).
 
+## What this library is for
+
+py61850 is a general IEC 61850 toolkit, not a support library for one
+application. Every part of it is judged against what an open equivalent of
+IEDScout or an IEC browser would need — and against what the *next* project to
+use it will need, not only the one that prompted the code.
+
+Concretely, that means three things for any change here:
+
+- **Model the standard, not the file in front of you.** If IEC 61850 defines
+  it and a vendor-neutral tool would show it, the API should express it — even
+  when today's caller does not ask.
+- **No vendor specifics in this library.** Vendors extend SCL through
+  `Private` elements and through standard attributes carrying their own value
+  grammars (`sAddr` is the usual one). py61850 exposes both faithfully and
+  interprets neither. A vendor library attaches to the model; it does not
+  live inside it.
+- **Derive, do not hardcode.** A list of names that stands in for a type the
+  file already declares will be wrong on some file. Resolve
+  `DataTypeTemplates` and answer from what the document says.
+
 ## Install
 
 ```bash
@@ -86,6 +107,27 @@ with FileTransfer("192.0.2.22") as ft:
     ft.download_file("/EVENTS/C4_10117.TXT", "out/C4_10117.TXT",
                      progress=lambda got, total: print(f"{got}/{total}"))
 ```
+
+### Reading an SCL file
+
+```python
+from py61850.scl import SclDocument
+
+doc = SclDocument.parse("station.scd")
+
+for name, header in doc.ied_headers.items():           # cheap: no instance tree
+    print(name, header.manufacturer, header.config_version)
+
+print(doc.communication.ip_by_ied())                   # {iedName: IP}
+
+ied = doc.ied("QPC1_TR1_UPC1")                         # built on demand, cached
+for ln in ied.logical_nodes():
+    for attr in ln.walk():
+        print(attr.reference(), attr.mms_item(), attr.fc, attr.btype)
+```
+
+`py61850.scl` is imported explicitly and is never pulled in by `import
+py61850`, so the MMS client keeps installing and running unprivileged.
 
 Errors share one base, so a fleet job catches the whole family at once:
 

@@ -23,6 +23,26 @@ Contributions that need **no** CLA: issues, bug reports, feature requests,
 questions, and recorded PDUs for `tests/fixtures/` (data captured from a device,
 not authored code).
 
+## What a patch is judged against
+
+py61850 is a general IEC 61850 toolkit. A change is assessed against what any
+61850 tool would need, not only against the use that prompted it:
+
+- **Model the standard, not one file.** "The files I have do not use it" is a
+  reason to document the gap, not to design it out.
+- **No vendor specifics.** Vendors extend SCL through `Private` elements and
+  through standard attributes carrying vendor value grammars. Expose both
+  faithfully; interpret neither. Vendor handling belongs in a library that
+  attaches to this one.
+- **Derive from the file, do not hardcode a list.** A hardcoded set of names
+  standing in for a type the document already declares is wrong on some
+  document. If `DataTypeTemplates` can answer it, resolve it.
+- **Say what you measured.** The commit body carries the numbers that
+  justified the change. "It is faster" is not a claim this project accepts;
+  "1406 ms to 670 ms on a 22 MB SCD" is.
+- **Zero runtime dependencies, Python 3.9, Linux + Windows + macOS.** All
+  three are checked in CI and none is negotiable.
+
 ## What makes a good patch here
 
 The repository conventions worth knowing before you start; the ones that come
