@@ -160,9 +160,11 @@ def ldevice(inst, body="", **attrs):
     return f'<LDevice inst="{inst}"{extra}>{body}</LDevice>'
 
 
-def access_point(name="S1", body="", server=True):
+def access_point(name="S1", body="", server=True, lns=""):
+    """An `<AccessPoint>`. `lns` goes BESIDE the Server, not inside it --
+    that is where 61850-6 puts a gateway's proxy LNs."""
     inner = f"<Server>{body}</Server>" if server else body
-    return f'<AccessPoint name="{name}">{inner}</AccessPoint>'
+    return f'<AccessPoint name="{name}">{inner}{lns}</AccessPoint>'
 
 
 def dai(name, val=None, s_addr=None, body=""):

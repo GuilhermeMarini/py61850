@@ -126,6 +126,83 @@ class TestIed(_Base):
         self.assertEqual([ld.inst for ld in ied.ldevices()], ["PRO"])
 
 
+class TestAccessPointLogicalNodes(_Base):
+    """LNs declared directly under an `<AccessPoint>`, outside any Server.
+
+    61850-6 allows them, and a gateway uses them: the reference SEL station's
+    RTAC carries an `ITCI` on its `C1` access point holding 58 bound
+    `ExtRef`s. While they were unmodelled, `Ied.ext_refs()` -- documented as
+    "every ExtRef in the IED" -- returned 1,290 of that device's 1,348.
+    """
+
+    def ap_ied(self):
+        return self.doc(
+            fx.templates(fx.lnode_type("T_ITCI", ln_class="ITCI")),
+            fx.ied("GW", body=fx.access_point(
+                "C1",
+                body=fx.ldevice("PRO", body=fx.ln0()),
+                lns=fx.ln("ITCI", inst="1", prefix="I", ln_type="T_ITCI",
+                          body=fx.inputs(fx.ext_ref(
+                              iedName="PUB", srcLDInst="CFG",
+                              srcCBName="GoSB00", intAddr="VB001"))))))
+
+    def test_they_are_reachable_from_the_access_point(self):
+        ap = self.ap_ied().ied("GW").access_points[0]
+        self.assertEqual([n.name for n in ap.logical_nodes], ["IITCI1"])
+        self.assertEqual(ap.logical_nodes[0].ln_class, "ITCI")
+
+    def test_they_are_not_confused_with_the_servers_own_nodes(self):
+        # The Server's LNs stay where they are: an AccessPoint-level LN is a
+        # sibling of <Server>, never a member of it.
+        ap = self.ap_ied().ied("GW").access_points[0]
+        self.assertEqual([n.name for n in ap.server.ldevices[0].logical_nodes],
+                         ["LLN0"])
+
+    def test_the_ieds_logical_nodes_include_them(self):
+        names = [n.name for n in self.ap_ied().ied("GW").logical_nodes()]
+        self.assertEqual(names, ["LLN0", "IITCI1"])
+
+    def test_their_ext_refs_reach_ied_ext_refs(self):
+        # The bug this class exists for: 58 real subscriptions of a gateway
+        # were invisible to a caller asking the IED for its inputs.
+        refs = self.ap_ied().ied("GW").ext_refs()
+        self.assertEqual([r.int_addr for r in refs], ["VB001"])
+        self.assertEqual(refs[0].source_key, ("PUB", "CFG", "GoSB00"))
+
+    def test_they_have_no_logical_device_and_so_no_reference(self):
+        # Not a failure to report a name: an LN outside a Server is in no MMS
+        # domain, so 61850-6 gives it no LDName/LNName to return.
+        node = self.ap_ied().ied("GW").access_points[0].logical_nodes[0]
+        self.assertIsNone(node.ldevice)
+        self.assertIsNone(node.reference)
+
+    def test_they_still_resolve_their_type_through_the_document_pool(self):
+        # The type pool hangs off the DOCUMENT, not off the LDevice, so an
+        # LN with no LDevice resolves like any other.
+        d = self.doc(
+            fx.templates(
+                fx.lnode_type("T_ITCI", ln_class="ITCI",
+                              dos=[("Health", "T_INS")]),
+                fx.do_type("T_INS", cdc="INS",
+                           das=[{"name": "stVal", "fc": "ST",
+                                 "bType": "INT32"}])),
+            fx.ied("GW", body=fx.access_point(
+                "C1", server=False,
+                lns=fx.ln("ITCI", inst="1", ln_type="T_ITCI"))))
+        node = d.ied("GW").access_points[0].logical_nodes[0]
+        attr = node.data_objects["Health"].attributes["stVal"]
+        self.assertEqual(attr.fc, "ST")
+        self.assertEqual(attr.btype, "INT32")
+        # The item name never needed the domain; the object reference does.
+        self.assertEqual(attr.mms_item(), "ITCI1$ST$Health$stVal")
+        self.assertIsNone(attr.reference())
+
+    def test_an_access_point_with_no_lns_reports_none(self):
+        d = self.doc(fx.ied("A", body=fx.access_point(
+            body=fx.ldevice("PRO", body=fx.ln0()))))
+        self.assertEqual(d.ied("A").access_points[0].logical_nodes, [])
+
+
 class TestLDevice(_Base):
     def test_ld_name_defaults_to_ied_name_plus_inst(self):
         d = self.doc(fx.ied("QPC1", body=fx.access_point(

@@ -111,8 +111,19 @@ class ControlBlock:
 
     @property
     def key(self) -> tuple:
+        """``(iedName, ldInst, name)``.
+
+        ``ldInst`` is ``""`` for a control block on an access-point-level LN,
+        which is what the SCL would spell there too: such a node is in no
+        logical device, so there is no ``inst`` to quote. No file in the
+        reference corpus carries one -- 61850-6 puts control blocks on an
+        ``LN0``, and an access-point LN is never one -- but the key must
+        still be a triple rather than raise, because it is what every
+        publisher/subscriber join in this package looks up by.
+        """
         ld = self.logical_node.ldevice
-        return (ld.ied.name, ld.inst, self.name)
+        return (self.logical_node.ied.name, "" if ld is None else ld.inst,
+                self.name)
 
     def __repr__(self):
         return f"<{self.kind} {self.key!r} datSet={self.dat_set!r}>"
