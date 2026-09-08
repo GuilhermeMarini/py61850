@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Guilherme Marini
+#
+# This file is part of py61850. It is free software under the GNU Affero
+# General Public License v3 or later; see LICENSE. A commercial licence,
+# for use in software you do not wish to release under the AGPL, is
+# available from the copyright holder -- see COMMERCIAL.md.
+"""Small SCL documents, built in Python so a test shows the exact XML it
+depends on.
+
+``tests/fixtures/`` holds recorded MMS bytes off real hardware; SCL test
+material is synthetic and belongs here instead, where it can be read beside
+the assertion it supports.
+"""
+
+SCL_NS = "http://www.iec.ch/61850/2003/SCL"
+
+
+def scl(*sections, **kwargs):
+    """An `<SCL>` document containing `sections`, as a text string.
+
+    ``ns=False`` drops the namespace declaration entirely -- hand-made SCDs
+    that declare none are real, and every reader here must survive them.
+    """
+    ns = kwargs.pop("ns", True)
+    assert not kwargs, kwargs
+    decl = f' xmlns="{SCL_NS}"' if ns else ""
+    body = "\n".join(sections)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<SCL{decl}>\n{body}\n</SCL>\n'
+
+
+def header(id_="ST1", version="2007", revision="B", tool_id="test"):
+    return (f'<Header id="{id_}" version="{version}" revision="{revision}" '
+            f'toolID="{tool_id}" nameStructure="IEDName"/>')
+
+
+def private(type_, text=""):
+    return f'<Private type="{type_}">{text}</Private>'
+
+
+def ied(name, body="", **attrs):
+    """An `<IED>` element. `attrs` become XML attributes verbatim."""
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<IED name="{name}"{extra}>\n{body}\n</IED>'
+
+
+def write(tmpdir, name, text):
+    """Write `text` to `tmpdir/name` as UTF-8 and return the path."""
+    import os
+    path = os.path.join(tmpdir, name)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return path
