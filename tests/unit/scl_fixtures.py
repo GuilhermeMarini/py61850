@@ -139,3 +139,19 @@ def ldevice(inst, body="", **attrs):
 def access_point(name="S1", body="", server=True):
     inner = f"<Server>{body}</Server>" if server else body
     return f'<AccessPoint name="{name}">{inner}</AccessPoint>'
+
+
+def dai(name, val=None, s_addr=None, body=""):
+    attrs = f' name="{name}"'
+    if s_addr is not None:
+        attrs += f' sAddr="{s_addr}"'
+    inner = body + (f"<Val>{val}</Val>" if val is not None else "")
+    return f"<DAI{attrs}>{inner}</DAI>"
+
+
+def sdi(name, body=""):
+    return f'<SDI name="{name}">{body}</SDI>'
+
+
+def doi(name, body=""):
+    return f'<DOI name="{name}">{body}</DOI>'

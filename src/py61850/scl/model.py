@@ -21,7 +21,9 @@ from __future__ import annotations
 
 from ..core.refs import ld_name as _ld_name
 from ..core.refs import ln_name as _ln_name
-from .document import children_local, iter_local, privates_of
+from ..core.refs import mms_item as _mms_item
+from ..core.refs import object_reference as _object_reference
+from .document import children_local, iter_local, privates_of, strip_ns
 
 
 class IedHeader:
@@ -85,6 +87,34 @@ class LogicalNode:
     def reference(self) -> str:
         """``LDName/LNName``."""
         return f"{self.ldevice.ld_name}/{self.name}"
+
+    @property
+    def data_objects(self) -> dict:
+        """``{name: DataObject}`` -- every DO this LN's type declares.
+
+        Resolved through the document's type pool and cached on the node. An
+        LN whose ``lnType`` the file does not carry gets an empty mapping: a
+        dangling type reference is a fact to report, not a reason to fail the
+        document.
+        """
+        dos = self._cache.get("data_objects")
+        if dos is None:
+            pool = self.ldevice.ied.document.templates
+            spec = pool.lnode_type(self.ln_type)
+            dos = self._cache["data_objects"] = {}
+            if spec is not None:
+                doi_by_name = {d.get("name"): d
+                               for d in children_local(self.element, "DOI")}
+                for do_name, do_type in spec.objects.items():
+                    dos[do_name] = DataObject(do_name, do_type, self,
+                                              doi_by_name.get(do_name))
+        return dos
+
+    def walk(self):
+        """Every data attribute in this logical node, depth first."""
+        for do in self.data_objects.values():
+            for attr in do.walk():
+                yield attr
 
     def __repr__(self):
         return f"<LogicalNode {self.reference!r} lnType={self.ln_type!r}>"
@@ -214,3 +244,142 @@ class Ied:
 
     def __repr__(self):
         return f"<Ied {self.name!r} lds={len(self.ldevices())}>"
+
+
+# An SDO chain that references itself is malformed but reachable; expansion
+# stops here rather than exhausting the stack.
+_MAX_DO_DEPTH = 8
+
+
+class DataAttribute:
+    """One data attribute of one instance: what the type declares, plus what
+    the instance overrides.
+
+    ``value`` and ``s_addr`` come from the ``DAI``, when the file carries one;
+    everything else comes from the type. An attribute with no ``DAI`` is a
+    complete, servable attribute with no configured value -- which is the
+    normal case and the reason this model exists.
+    """
+
+    __slots__ = ("name", "fc", "btype", "type", "enum_values", "value",
+                 "s_addr", "sub_attributes", "path", "privates",
+                 "logical_node", "_do_path")
+
+    def __init__(self, spec, logical_node, do_path, dai_el=None):
+        self.name = spec.name
+        self.fc = spec.fc
+        self.btype = spec.btype
+        self.type = spec.type
+        self.enum_values = spec.enum_values
+        self.privates = spec.privates
+        self.logical_node = logical_node
+        self._do_path = tuple(do_path)
+        #: The descent from the data object to this attribute, one entry per
+        #: level: ``("Pos", "Oper", "ctlVal")``.
+        self.path = self._do_path + (spec.name,)
+        self.value = None
+        self.s_addr = None
+        self.sub_attributes = {}
+        if dai_el is not None:
+            self._apply_instance(dai_el)
+        for name, sub_spec in spec.sub_specs.items():
+            self.sub_attributes[name] = DataAttribute(
+                sub_spec, logical_node, self.path,
+                _child_instance(dai_el, name))
+
+    def _apply_instance(self, el):
+        self.s_addr = el.get("sAddr")
+        val = next((c for c in el if strip_ns(c.tag) == "Val"), None)
+        if val is not None:
+            self.value = val.text
+
+    def mms_item(self) -> str:
+        """``CSWI1$CO$Pos$Oper$ctlVal`` -- the 61850-8-1 name."""
+        return _mms_item(self.logical_node.name, self.fc or "", self.path)
+
+    def reference(self) -> str:
+        """``QPC1PRO/CSWI1.Pos.Oper.ctlVal`` -- the 61850-6 object reference."""
+        return _object_reference(self.logical_node.ldevice.ld_name,
+                                 self.logical_node.name, self.path)
+
+    def walk(self):
+        """This attribute and every attribute beneath it, depth first."""
+        yield self
+        for sub in self.sub_attributes.values():
+            for item in sub.walk():
+                yield item
+
+    def __repr__(self):
+        return f"<DataAttribute {self.mms_item()!r} bType={self.btype!r}>"
+
+
+class DataObject:
+    """One data object of one logical node, resolved through its ``DOType``.
+
+    ``attributes`` holds EVERY attribute the type declares, not only those the
+    instance overrides. That is the difference between a model and an
+    extraction: an MMS server answering ``GetNameList``, or a browser drawing
+    a device tree, needs the ones nobody configured too.
+    """
+
+    __slots__ = ("name", "cdc", "do_type", "attributes", "sub_objects",
+                 "privates", "logical_node", "path")
+
+    def __init__(self, name, do_type_id, logical_node, doi_el=None,
+                 path=(), depth=0):
+        self.name = name
+        self.logical_node = logical_node
+        self.path = tuple(path) + (name,)
+        self.do_type = do_type_id
+        self.attributes = {}
+        self.sub_objects = {}
+        self.privates = privates_of(doi_el) if doi_el is not None else {}
+        pool = logical_node.ldevice.ied.document.templates
+        spec = pool.do_type(do_type_id)
+        if spec is None:
+            self.cdc = None
+            return
+        self.cdc = spec.cdc
+        for attr_name, attr_spec in spec.attributes.items():
+            self.attributes[attr_name] = DataAttribute(
+                attr_spec, logical_node, self.path,
+                _child_instance(doi_el, attr_name))
+        if depth >= _MAX_DO_DEPTH:
+            return
+        for sdo_name, sdo_type in spec.sub_objects.items():
+            self.sub_objects[sdo_name] = DataObject(
+                sdo_name, sdo_type, logical_node,
+                _child_instance(doi_el, sdo_name), self.path, depth + 1)
+
+    def walk(self):
+        """Every attribute in this object and its sub-objects, depth first."""
+        for attr in self.attributes.values():
+            for item in attr.walk():
+                yield item
+        for sub in self.sub_objects.values():
+            for item in sub.walk():
+                yield item
+
+    @property
+    def reference(self) -> str:
+        return _object_reference(self.logical_node.ldevice.ld_name,
+                                 self.logical_node.name, self.path)
+
+    def __repr__(self):
+        return f"<DataObject {self.reference!r} cdc={self.cdc!r}>"
+
+
+def _child_instance(el, name):
+    """The ``DOI``/``SDI``/``DAI`` child of ``el`` carrying ``name``, or ``None``.
+
+    One helper for all three because the instance side spells the descent with
+    three element names for what the type side spells with one nesting: a
+    ``DOI`` holds ``SDI``s and ``DAI``s, an ``SDI`` holds more of both.
+    """
+    if el is None:
+        return None
+    for child in el:
+        if (strip_ns(child.tag) in ("DOI", "SDI", "DAI")
+                and child.get("name") == name):
+            return child
+    return None
