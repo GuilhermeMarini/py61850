@@ -35,6 +35,7 @@ class TestPublicApi(unittest.TestCase):
     def test_expected_surface(self):
         self.assertEqual(sorted(py61850.__all__), sorted([
             "MmsClient", "FileTransfer", "DirEntry", "LogicalNode", "folder_of",
+            "FUNCTIONAL_CONSTRAINTS", "fc_is_control", "fc_read_rank",
             "Iec61850Error", "TransportError", "MmsError",
             "LinkError", "GooseError", "SvError", "SclError",
             "decode_read_response", "decode_data_definition", "decode_service_error",
