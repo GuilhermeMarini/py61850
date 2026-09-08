@@ -98,8 +98,12 @@ class ControlBlock:
         self.desc = el.get("desc")
         self.dat_set = el.get("datSet")
         self.conf_rev = el.get("confRev")
-        # GSEControl spells it appID; SampledValueControl spells it appID too
-        # but also carries smvID, which is the one a subscriber matches on.
+        # GSEControl spells it appID; SampledValueControl carries both smvID
+        # and (optionally) appID, and it is smvID that every real SVCB in
+        # the reference corpus actually uses -- of the 16 SampledValueControl
+        # elements in the mixed-vendor reference station, all 16 carry
+        # smvID and none carries appID, so this preference order never
+        # actually chooses between them for an SVCB in practice.
         self.app_id = el.get("appID") or el.get("smvID")
         self.type = el.get("type")
         self.privates = privates_of(el)
