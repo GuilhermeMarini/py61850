@@ -116,6 +116,38 @@ class LogicalNode:
             for attr in do.walk():
                 yield attr
 
+    @property
+    def data_sets(self) -> dict:
+        """``{name: DataSet}`` declared by THIS logical node.
+
+        Direct children only. A DataSet under LN0 and one under an LN are
+        both descendants of the LDevice, so collecting by descent would
+        attribute each of them to both.
+        """
+        return self._lazy("data_sets", lambda: _controls().data_sets_of(self))
+
+    @property
+    def control_blocks(self) -> dict:
+        """``{name: ControlBlock}`` -- report, GOOSE, sampled-value and log."""
+        return self._lazy("control_blocks",
+                          lambda: _controls().control_blocks_of(self))
+
+    @property
+    def setting_control(self):
+        """The ``SettingControl``, or ``None``."""
+        return self._lazy("setting_control",
+                          lambda: _controls().setting_control_of(self))
+
+    @property
+    def ext_refs(self) -> list:
+        """The ``Inputs``/``ExtRef`` entries, in document order."""
+        return self._lazy("ext_refs", lambda: _controls().ext_refs_of(self))
+
+    def _lazy(self, key, build):
+        if key not in self._cache:
+            self._cache[key] = build()
+        return self._cache[key]
+
     def __repr__(self):
         return f"<LogicalNode {self.reference!r} lnType={self.ln_type!r}>"
 
@@ -241,6 +273,15 @@ class Ied:
     def ldevice(self, inst):
         """The LDevice with this ``inst``, or ``None``."""
         return next((ld for ld in self.ldevices() if ld.inst == inst), None)
+
+    def ext_refs(self) -> list:
+        """Every ExtRef in the IED, in document order."""
+        return [r for n in self.logical_nodes() for r in n.ext_refs]
+
+    def control_blocks(self) -> list:
+        """Every control block in the IED, in document order."""
+        return [cb for n in self.logical_nodes()
+                for cb in n.control_blocks.values()]
 
     def __repr__(self):
         return f"<Ied {self.name!r} lds={len(self.ldevices())}>"
@@ -390,3 +431,9 @@ def _child_instance(el, name):
                 and child.get("name") == name):
             return child
     return None
+
+
+def _controls():
+    """Imported lazily so `model` and `controls` can refer to each other."""
+    from . import controls
+    return controls

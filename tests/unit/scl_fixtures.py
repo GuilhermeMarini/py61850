@@ -155,3 +155,41 @@ def sdi(name, body=""):
 
 def doi(name, body=""):
     return f'<DOI name="{name}">{body}</DOI>'
+
+
+def fcda(ld_inst, ln_class, do_name, fc, prefix="", ln_inst="", da_name=""):
+    return (f'<FCDA ldInst="{ld_inst}" prefix="{prefix}" lnClass="{ln_class}" '
+            f'lnInst="{ln_inst}" doName="{do_name}" daName="{da_name}" '
+            f'fc="{fc}"/>')
+
+
+def dataset(name, fcdas=(), desc=""):
+    return (f'<DataSet name="{name}" desc="{desc}">' + "".join(fcdas)
+            + "</DataSet>")
+
+
+def gse_control(name, dat_set, app_id="", conf_rev="1", body=""):
+    return (f'<GSEControl name="{name}" datSet="{dat_set}" appID="{app_id}" '
+            f'confRev="{conf_rev}" type="GOOSE">{body}</GSEControl>')
+
+
+def report_control(name, dat_set, conf_rev="1", body=""):
+    return (f'<ReportControl name="{name}" datSet="{dat_set}" '
+            f'confRev="{conf_rev}">{body}</ReportControl>')
+
+
+def smv_control(name, dat_set, app_id="4000"):
+    return (f'<SampledValueControl name="{name}" datSet="{dat_set}" '
+            f'smvID="{name}" appID="{app_id}"/>')
+
+
+def setting_control(num_of_sgs="6", act_sg="1"):
+    return f'<SettingControl numOfSGs="{num_of_sgs}" actSG="{act_sg}"/>'
+
+
+def ext_ref(**attrs):
+    return "<ExtRef" + "".join(f' {k}="{v}"' for k, v in sorted(attrs.items())) + "/>"
+
+
+def inputs(*refs):
+    return "<Inputs>" + "".join(refs) + "</Inputs>"
