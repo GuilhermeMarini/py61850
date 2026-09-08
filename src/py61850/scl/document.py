@@ -214,11 +214,23 @@ class SclDocument:
         An IED with no name is skipped: nothing can reference it -- not a
         ConnectedAP, not an ExtRef -- and keying it on ``""`` would collide
         with the next unnamed one.
+
+        DIRECT CHILDREN of the root only, deliberately -- not
+        :func:`iter_local`'s descendant search. Per 61850-6, ``<IED>`` is
+        valid only there; a vendor's ``Private`` block is free to reuse the
+        same local name for something that is not a device at all. DIGSI
+        nests a bare ``<IED uuidRef=... name=...>`` cross-reference inside
+        ``<Private><FolderDetails><FolderInfo>`` for project-tree bookkeeping,
+        one per real IED, ahead of the real element in document order. A
+        descendant scan matched that decoy first and shadowed the real IED
+        for every one of a reference station's 14 devices: every identifying
+        field came back ``None`` and the instance tree came back with no
+        LDevices at all.
         """
         els = self._cache.get("ied_elements")
         if els is None:
             els = self._cache["ied_elements"] = {}
-            for el in iter_local(self.root, "IED"):
+            for el in children_local(self.root, "IED"):
                 name = el.get("name")
                 if name and name not in els:
                     els[name] = el

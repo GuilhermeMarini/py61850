@@ -52,6 +52,29 @@ class TestIedHeaders(_Base):
         d.ied_headers
         self.assertNotIn("ied:A", d._cache)
 
+    def test_a_private_ied_lookalike_does_not_shadow_the_real_ied(self):
+        # A DIGSI-exported station nests a bare `<IED uuidRef=... name=...>`
+        # cross-reference inside `<Private><FolderDetails><FolderInfo>`, for
+        # project-tree bookkeeping -- one reference SCD carries one of these
+        # for every one of its 14 IEDs, and it comes BEFORE the real <IED> in
+        # document order. Matching "IED" by local name anywhere in the
+        # document, first-wins, picked the empty decoy instead of the real,
+        # populated element: every identifying field came back None and the
+        # instance tree came back with no LDevices at all.
+        decoy = fx.private(
+            "SEL_FolderInfo",
+            '<FolderDetails><FolderInfo parentHierarchy="X" folderName="Y">'
+            '<IED uuidRef="abc-123" name="REAL1"/>'
+            '</FolderInfo></FolderDetails>')
+        real = fx.ied("REAL1", type="SEL_487E", manufacturer="SEL",
+                      body=fx.access_point(body=fx.ldevice(
+                          "PRO", body=fx.ln0())))
+        d = self.doc(decoy, real)
+        h = d.ied_headers["REAL1"]
+        self.assertEqual(h.type, "SEL_487E")
+        self.assertEqual(h.manufacturer, "SEL")
+        ied = d.ied("REAL1")
+        self.assertEqual([ld.inst for ld in ied.ldevices()], ["PRO"])
 
 class TestIed(_Base):
     def test_access_points_and_ldevices(self):
