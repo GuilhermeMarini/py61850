@@ -21,15 +21,39 @@ def scl(*sections, **kwargs):
 
     ``ns=False`` drops the namespace declaration entirely -- hand-made SCDs
     that declare none are real, and every reader here must survive them.
+
+    ``version``/``revision``/``release`` set the SCHEMA EDITION attributes on
+    the ``<SCL>`` root itself, as the standard puts them -- real files carry
+    ``version="2007" revision="B" release="4"`` there, quite apart from
+    whatever bookkeeping ``<Header>`` carries. All three default to unset, so
+    a test that does not care about the edition gets none.
     """
     ns = kwargs.pop("ns", True)
+    version = kwargs.pop("version", None)
+    revision = kwargs.pop("revision", None)
+    release = kwargs.pop("release", None)
     assert not kwargs, kwargs
     decl = f' xmlns="{SCL_NS}"' if ns else ""
+    root_attrs = ""
+    if version is not None:
+        root_attrs += f' version="{version}"'
+    if revision is not None:
+        root_attrs += f' revision="{revision}"'
+    if release is not None:
+        root_attrs += f' release="{release}"'
     body = "\n".join(sections)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n<SCL{decl}>\n{body}\n</SCL>\n'
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n<SCL{decl}{root_attrs}>'
+            f'\n{body}\n</SCL>\n')
 
 
-def header(id_="ST1", version="2007", revision="B", tool_id="test"):
+def header(id_="ST1", version="1", revision="1.0", tool_id="test"):
+    """A ``<Header>``. Defaults are BOOKKEEPING-shaped, as real files' are --
+    an exporting tool's own version/revision, not the schema edition. On the
+    reference corpus ``Header@version``/``@revision`` hold values like
+    ``"204"``/``"1.0"`` (SEL) and ``"1"``/``"199"`` (Siemens), unrelated to
+    the ``2007``/``B`` every one of those files carries on the ``<SCL>``
+    root; see :func:`scl` for setting that.
+    """
     return (f'<Header id="{id_}" version="{version}" revision="{revision}" '
             f'toolID="{tool_id}" nameStructure="IEDName"/>')
 

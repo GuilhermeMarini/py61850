@@ -111,13 +111,41 @@ class TestPrivates(_TmpMixin):
 
 
 class TestEdition(_TmpMixin):
-    def test_edition_comes_from_the_header(self):
-        self.assertEqual(self.doc(fx.scl(fx.header(version="2007",
-                                                   revision="B"))).edition,
-                         "2007B")
+    def test_edition_comes_from_the_root_not_the_header(self):
+        # Header carries the exporting tool's own bookkeeping -- values that
+        # look nothing like an edition on real files (e.g. version="204"
+        # revision="1.0" on the SEL reference station). The edition lives on
+        # the <SCL> root instead.
+        d = self.doc(fx.scl(fx.header(version="204", revision="1.0"),
+                            version="2007", revision="B", release="4"))
+        self.assertEqual(d.edition, "2007B")
 
-    def test_edition_is_none_without_a_header(self):
-        self.assertIsNone(self.doc(fx.scl(fx.ied("I"))).edition)
+    def test_release_is_exposed_separately(self):
+        d = self.doc(fx.scl(fx.header(), version="2007", revision="B",
+                            release="4"))
+        self.assertEqual(d.release, "4")
+
+    def test_edition_2_and_edition_2_1_are_distinguishable(self):
+        # "2007B" alone is the same string for both -- release is what tells
+        # Edition 2 (release 3) apart from Edition 2.1 (release 4).
+        ed2 = self.doc(fx.scl(fx.header(), version="2007", revision="B",
+                              release="3"))
+        ed2_1 = self.doc(fx.scl(fx.header(), version="2007", revision="B",
+                                release="4"))
+        self.assertEqual(ed2.edition, ed2_1.edition)
+        self.assertNotEqual(ed2.release, ed2_1.release)
+        self.assertEqual(ed2.release, "3")
+        self.assertEqual(ed2_1.release, "4")
+
+    def test_edition_is_none_without_a_root_version(self):
+        # A header carrying edition-shaped values does not count: the root
+        # is the only place this reads from.
+        d = self.doc(fx.scl(fx.header(version="2007", revision="B")))
+        self.assertIsNone(d.edition)
+
+    def test_release_is_none_without_one(self):
+        d = self.doc(fx.scl(fx.header(), version="2007", revision="B"))
+        self.assertIsNone(d.release)
 
 
 if __name__ == "__main__":

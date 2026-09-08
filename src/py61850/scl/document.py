@@ -165,16 +165,40 @@ class SclDocument:
 
     @property
     def edition(self):
-        """``"2007B"``, ``"2003"``, ... from the header, or ``None``.
+        """``"2007B"``, ``"2003"``, ... or ``None`` when the root carries no
+        ``version``.
 
-        Read from the header rather than guessed from the namespace: a file
-        declares several namespaces and the standard one has not changed URI
-        since Edition 1, so the namespace does not identify the edition.
+        Read from ``version``/``revision`` on the ``<SCL>`` root, not from
+        ``<Header>``. Two things might look like a source for the edition and
+        neither is: the namespace URI, because it has not changed since
+        Edition 1, and ``Header@version``/``@revision``, because those are
+        the exporting TOOL's own bookkeeping, not the schema edition -- on
+        the three reference files this reads (SEL, Siemens, a mixed-vendor
+        station) they hold values like ``"204"``/``"1.0"`` and
+        ``"1"``/``"199"``, unrelated to the ``2007``/``B`` every one of the
+        three actually validates against. The standard puts the edition on
+        the root element itself: 61850-6 defines ``version``, ``revision``
+        and ``release`` there, and all three reference files carry
+        ``version="2007" revision="B"``. See :attr:`release` for the third
+        of those three, which distinguishes Edition 2 from Edition 2.1 and
+        which this short form drops.
         """
-        h = self.header
-        if h is None or not h.version:
+        version = self.root.get("version")
+        if not version:
             return None
-        return f"{h.version}{h.revision or ''}"
+        return f"{version}{self.root.get('revision') or ''}"
+
+    @property
+    def release(self):
+        """The root's ``release`` attribute, or ``None``.
+
+        This is what separates Edition 2 (``2007/B/3``) from Edition 2.1
+        (``2007/B/4``) -- :attr:`edition` alone reads ``"2007B"`` for both.
+        Kept as a separate property rather than folded into ``edition``'s
+        string so a consumer that only cares about the pre-2.1 distinction
+        is not forced to parse one back apart.
+        """
+        return self.root.get("release")
 
     @property
     def privates(self) -> dict:
