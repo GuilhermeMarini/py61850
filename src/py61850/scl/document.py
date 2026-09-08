@@ -181,6 +181,20 @@ class SclDocument:
         """Document-level ``Private`` elements, ``{type: [element, ...]}``."""
         return privates_of(self.root)
 
+    @property
+    def templates(self):
+        """The document's :class:`~py61850.scl.templates.TemplatePool`.
+
+        Built on first access and cached. Templates are station-wide while
+        instances are per IED, which is why this hangs off the document and
+        the instance trees do not.
+        """
+        pool = self._cache.get("templates")
+        if pool is None:
+            from .templates import TemplatePool
+            pool = self._cache["templates"] = TemplatePool(self.root)
+        return pool
+
     def __repr__(self) -> str:
         return f"<SclDocument path={self.path!r} edition={self.edition!r}>"
 

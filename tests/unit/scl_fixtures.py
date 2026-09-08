@@ -51,3 +51,37 @@ def write(tmpdir, name, text):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
     return path
+
+
+def templates(*types):
+    """A `<DataTypeTemplates>` section containing `types`."""
+    return "<DataTypeTemplates>\n" + "\n".join(types) + "\n</DataTypeTemplates>"
+
+
+def lnode_type(id_, ln_class="LLN0", dos=(), body=""):
+    """`dos` is a sequence of (DO name, DOType id)."""
+    inner = "".join(f'<DO name="{n}" type="{t}"/>' for n, t in dos)
+    return f'<LNodeType id="{id_}" lnClass="{ln_class}">{inner}{body}</LNodeType>'
+
+
+def do_type(id_, cdc="SPS", das=(), sdos=(), body=""):
+    """`das` is a sequence of dicts of DA attributes; `sdos` of (name, type)."""
+    inner = "".join(
+        "<DA" + "".join(f' {k}="{v}"' for k, v in sorted(d.items())) + "/>"
+        for d in das)
+    inner += "".join(f'<SDO name="{n}" type="{t}"/>' for n, t in sdos)
+    return f'<DOType id="{id_}" cdc="{cdc}">{inner}{body}</DOType>'
+
+
+def da_type(id_, bdas=()):
+    """`bdas` is a sequence of dicts of BDA attributes."""
+    inner = "".join(
+        "<BDA" + "".join(f' {k}="{v}"' for k, v in sorted(d.items())) + "/>"
+        for d in bdas)
+    return f'<DAType id="{id_}">{inner}</DAType>'
+
+
+def enum_type(id_, values=()):
+    """`values` is a sequence of (ord, text)."""
+    inner = "".join(f'<EnumVal ord="{o}">{t}</EnumVal>' for o, t in values)
+    return f'<EnumType id="{id_}">{inner}</EnumType>'
