@@ -52,3 +52,9 @@ packages = ["src/py61850"]
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "examples", "README.md", "ROADMAP.md", "LICENSE",
            "COMMERCIAL.md", "CONTRIBUTING.md", "CLA.md"]
+# The SCL round-trip corpus is 44 MB of real vendor SCDs -- a development
+# artefact, not something an installer needs. Shipping it would grow the sdist
+# of a zero-dependency standard-library package by ~2.3 MB compressed and buy
+# whoever downloads it nothing. `tests/fixtures/scl/README.md` says how to
+# obtain the corpus; the tests that need it skip when it is absent.
+exclude = ["tests/fixtures/scl/*.scd"]
