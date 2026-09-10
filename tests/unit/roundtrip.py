@@ -70,9 +70,11 @@ CORPUS = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "scl"
 _REGION = re.compile(rb"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<[^>]*>", re.S)
 
 # `xmlns="uri"` and `xmlns:pfx="uri"`, with the prefix CAPTURED. The library's
-# own `_declared_namespaces()` collects the URI and drops the prefix, which is
-# most of why A3 has work to do; recovering the pair here is also what keeps
-# this harness independent of it.
+# own `_declared_namespaces()` now recovers the same pair, by a regex that
+# looks much like this one -- and this one stays, deliberately. A harness that
+# imported the library's scanner would agree with the library about what the
+# file declares even when both were wrong, which is the one failure a
+# round-trip test exists to catch.
 _NS_DECL = re.compile(rb"""xmlns(?::([A-Za-z0-9_.\-]+))?\s*=\s*["']([^"']+)["']""")
 
 # A prefix `ElementTree` invented because nothing registered the real one.

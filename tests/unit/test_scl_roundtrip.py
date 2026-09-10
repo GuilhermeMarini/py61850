@@ -34,9 +34,10 @@ records what was anonymised out of them and what deliberately was not.
 Four cosmetic exceptions are permitted and no more -- attribute quote style,
 empty-element spacing, CDATA boundaries and the spelling of a numeric
 character reference. `roundtrip.normalise` erases exactly those, counts what
-it erased, and touches nothing else. Everything else is a gap, including two
-that no phase of the current plan closes yet and that were taken in scope
-deliberately: **line endings** and the **XML declaration**.
+it erased, and touches nothing else. Everything else is a gap, including
+three that were taken in scope deliberately and that the writer closes:
+**line endings**, the **XML declaration**, and the **order of the root's
+attributes**.
 
 Line endings are the one worth stating a reason for. All three vendor
 fixtures are CRLF files; XML end-of-line normalisation is mandatory and
@@ -47,6 +48,17 @@ is exactly the outcome the fidelity guarantee exists to prevent -- and it
 would quietly rewrite the SEL settings text embedded in that file's CDATA
 sections, whose own CRLF breaks are part of the payload. So the writer will
 record the line ending it read and re-emit it, and until it does, this fails.
+
+The root's attribute order is the third, and it is the one that shows up
+nowhere except in `test_bytes`. `ElementTree` writes the namespace
+declarations it GENERATES first, sorted by prefix, ahead of every ordinary
+attribute; the unused ones this library re-emits as literal attributes land
+after them all. Real roots interleave the two -- `sel.scd` opens
+`<SCL xmlns:esel=... version=...>` and `siemens.scd` opens
+`<SCL version=... xmlns=...>` -- so every fixture's line 2 differs even now
+that all four have every declaration, under its own prefix. Nothing but the
+root element is affected: `ElementTree` preserves attribute order everywhere
+that it is not also emitting a declaration.
 """
 
 import functools
@@ -61,31 +73,30 @@ from . import roundtrip
 # closed is an unexpected success.
 KNOWN_GAPS = {
     "sel.scd": {
-        "namespace_prefixes": "the default and esel: rewritten to ns0: and ns1: (A3)",
         "line_endings": "660,549 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the three above",
+        "bytes": "the two above, and both root declarations hoisted ahead of "
+                 "version= (the writer)",
     },
     "mixed.scd": {
-        "namespace_declarations": "IEC_60870_5_104 and siebase are declared and never used (A3)",
-        "namespace_prefixes": "four of the seven rewritten to ns0:, ns2:, ns3:, ns4: (A3)",
         "line_endings": "379,313 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the four above",
+        "bytes": "the two above, and the root's seven declarations split -- five "
+                 "hoisted ahead of version=, two re-emitted after every attribute "
+                 "(the writer)",
     },
     "siemens.scd": {
-        "namespace_declarations": "IEC_60870_5_104 and siebase are declared and never used (A3)",
-        "namespace_prefixes": "three of the six rewritten to ns0:, ns2:, ns3: (A3)",
         "line_endings": "216,700 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the four above",
+        "bytes": "the two above, and the root's six declarations split -- four "
+                 "hoisted ahead of version=, two re-emitted after every attribute "
+                 "(the writer)",
     },
     "namespaces.scd": {
-        "namespace_declarations": "xmlns:sel is declared and never used (A3)",
-        "namespace_prefixes": "the default and sxy: rewritten to ns0: and ns1: (A3)",
         "line_endings": "the trailing newline after </SCL> is not written (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the four above",
+        "bytes": "the two above, and xmlns:sel re-emitted after release= instead "
+                 "of before version= (the writer)",
     },
 }
 
