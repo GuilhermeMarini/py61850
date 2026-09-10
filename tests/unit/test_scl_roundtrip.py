@@ -61,27 +61,24 @@ from . import roundtrip
 # closed is an unexpected success.
 KNOWN_GAPS = {
     "sel.scd": {
-        "comments": "29 comments dropped -- the parser inserts none (A2)",
         "namespace_prefixes": "the default and esel: rewritten to ns0: and ns1: (A3)",
         "line_endings": "660,549 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the four above",
+        "bytes": "the three above",
     },
     "mixed.scd": {
-        "comments": "1 comment dropped (A2)",
         "namespace_declarations": "IEC_60870_5_104 and siebase are declared and never used (A3)",
         "namespace_prefixes": "four of the seven rewritten to ns0:, ns2:, ns3:, ns4: (A3)",
         "line_endings": "379,313 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the five above",
+        "bytes": "the four above",
     },
     "siemens.scd": {
-        "comments": "2 comments dropped (A2)",
         "namespace_declarations": "IEC_60870_5_104 and siebase are declared and never used (A3)",
         "namespace_prefixes": "three of the six rewritten to ns0:, ns2:, ns3: (A3)",
         "line_endings": "216,700 CRLF lines written back as LF (the writer)",
         "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the five above",
+        "bytes": "the four above",
     },
     "namespaces.scd": {
         "namespace_declarations": "xmlns:sel is declared and never used (A3)",
