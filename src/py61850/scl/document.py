@@ -28,6 +28,7 @@ would silently return nothing for either.
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 from pathlib import Path
@@ -147,6 +148,30 @@ class SclDocument:
         except (OSError, ET.ParseError) as e:
             _logger.warning("error reading SCL file %s: %s", p, e)
         return None
+
+    # -- serialisation ------------------------------------------------------
+
+    def _to_bytes(self) -> bytes:
+        """The document as bytes -- **private, and deliberately plain**.
+
+        This is the seam the round-trip test measures, and today it is exactly
+        what ``ElementTree`` does and nothing more. It carries no fidelity
+        guarantee: comments were dropped by the parser long before this is
+        reached, prefixes come back as ``ns0:``, a namespace declared on the
+        root and used nowhere is gone, and the line ending and the XML
+        declaration are the serialiser's rather than the file's.
+
+        It is private because a name a consumer can reach is a promise, and
+        that promise is not true yet. It exists now so that the work which
+        makes it true has one call site to improve rather than a call site to
+        move: ``tests/unit/test_scl_roundtrip.py`` lists every gap between
+        this and the bytes the document was parsed from, and each is closed
+        here. When the list is empty this becomes the public write API, with
+        the guarantee and its cosmetic exceptions written into its docstring.
+        """
+        buf = io.BytesIO()
+        ET.ElementTree(self.root).write(buf, encoding="utf-8", xml_declaration=True)
+        return buf.getvalue()
 
     # -- shallow facts ------------------------------------------------------
 

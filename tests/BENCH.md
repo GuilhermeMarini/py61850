@@ -6,7 +6,7 @@ cannot prove is that a *relay* accepts them. This file lists the changes that
 are only confirmed against synthetic tests, with the exact check to run at the
 bench and what a pass looks like.
 
-Test fleet: `10.165.107.22` (SEL-411L), and the SEL-451-5 the measurements in
+Test fleet: `192.0.2.22` (SEL-411L), and the SEL-451-5 the measurements in
 issue #1 came from (FID `SEL-451-5-R331-V1-Z033014-D20250919`).
 
 Delete a row once it has been run on hardware; if it fails, the capture belongs
@@ -24,7 +24,7 @@ with no MMS error.
 ```python
 from py61850 import MmsClient
 
-with MmsClient("10.165.107.22") as c:
+with MmsClient("192.0.2.22") as c:
     print(c.t.negotiated_tpdu_size, c.max_pdu_size, c.max_outstanding)
     ld = c.get_server_directory()[0]
     names = c.get_logical_device_directory(ld)
@@ -70,7 +70,7 @@ rather than replacing the ObjectName tag. That reading is from the ASN.1; it has
 never been on the wire from here.
 
 ```python
-with MmsClient("10.165.107.22") as c:
+with MmsClient("192.0.2.22") as c:
     ld = c.get_server_directory()[0]
     sets = c.get_data_set_directory(ld)          # SEL ships BRDSet01…
     print(sets)
@@ -100,7 +100,7 @@ name variables in different logical devices. Every capture we have repeats a
 single domain, so the mixed form has never been on the wire from here.
 
 ```python
-with MmsClient("10.165.107.22") as c:
+with MmsClient("192.0.2.22") as c:
     lds = c.get_server_directory()[:2]
     print(c.read_refs([(ld, "LLN0$ST$Beh$stVal") for ld in lds]))
 ```

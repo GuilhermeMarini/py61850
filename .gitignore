@@ -22,3 +22,24 @@ inventory.csv
 *.sed
 *.SED
 fixtures/ICD/
+
+# The round-trip corpus is tracked, by name and never by wildcard.
+#
+# The `*.scd` rule above is right for every SCD except these four: a vendor
+# file dropped in this tree is somebody's substation and must not be
+# committed by accident. The three real ones below were anonymised by
+# `tools/anonymise_scd.py` before they were added -- substation, utility,
+# Windows accounts, machine names and addressing all substituted, IED names
+# deliberately kept. The fourth is hand-written and carries no identity.
+#
+# Named one by one on purpose. A negation like `!tests/fixtures/scl/*.scd`
+# would re-include ANY .scd dropped in that directory, which is exactly how
+# an un-anonymised file reached a sibling repository once.
+!tests/fixtures/scl/sel.scd
+!tests/fixtures/scl/mixed.scd
+!tests/fixtures/scl/siemens.scd
+!tests/fixtures/scl/namespaces.scd
+
+# The substitution mapping names what was substituted -- the substation, the
+# utility, the engineers' accounts. Tracking it would undo the anonymisation.
+tools/*.local.json
