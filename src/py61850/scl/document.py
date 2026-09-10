@@ -41,8 +41,30 @@ _logger = logging.getLogger(__name__)
 _NS_DECL = re.compile(br'xmlns(?::[A-Za-z0-9_.-]+)?\s*=\s*["\']([^"\']+)["\']')
 
 
-def strip_ns(tag: str) -> str:
-    """``{ns}LocalName`` -> ``LocalName``."""
+def strip_ns(tag) -> str:
+    """``{ns}LocalName`` -> ``LocalName``; ``""`` for a node that is not an element.
+
+    **A tag that is not a string is not an error here.** The parser keeps
+    comments -- see :meth:`SclDocument.parse` -- so every walk over an
+    element's children now meets nodes whose ``tag`` is the FACTORY that made
+    them rather than a name: ``ET.Comment`` for a comment,
+    ``ET.ProcessingInstruction`` for a processing instruction. Both are
+    callables, and ``tag.rsplit`` on one raises ``AttributeError``.
+
+    The guard lives here rather than at the call sites because every traversal
+    in this package funnels through this one function -- :func:`iter_local`,
+    :func:`children_local`, :func:`privates_of` and the two instance walks in
+    ``model.py`` -- as does every vendor library, which reaches the tree
+    through those helpers and never by raw iteration. One guard covers all of
+    them, and a traversal added later inherits it instead of reintroducing the
+    bug.
+
+    ``""`` rather than ``None``: it is falsy, it can never equal a local name,
+    so a comment is simply skipped by every ``== local_name`` test above, and
+    the return type stays one thing for every caller.
+    """
+    if not isinstance(tag, str):
+        return ""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
@@ -51,7 +73,16 @@ def iter_local(root: ET.Element, local_name: str):
 
     Includes ``root`` itself when it matches, which is what makes
     ``iter_local(ied_el, "LDevice")`` read naturally.
+
+    Comments and processing instructions are never returned: they have no
+    local name, and :func:`strip_ns` reports that as ``""``.
     """
+    if not local_name:
+        # An element's local name is never empty, so an empty argument can
+        # match no element -- and without this it would match every COMMENT,
+        # whose `strip_ns` is exactly `""`. Returning nothing keeps the
+        # docstring above literally true for every argument.
+        return
     for el in root.iter():
         if strip_ns(el.tag) == local_name:
             yield el
@@ -65,6 +96,8 @@ def children_local(node: ET.Element, local_name: str):
     descendants of the LDevice, so collecting by descent attributes each of
     them to both.
     """
+    if not local_name:
+        return          # see `iter_local`
     for el in node:
         if strip_ns(el.tag) == local_name:
             yield el
@@ -127,12 +160,32 @@ class SclDocument:
         ``OSError`` for a file that cannot be read, ``ET.ParseError`` for XML
         that will not parse, and :class:`DtdNotAllowed` for one declaring a
         DTD.
+
+        **Comments are kept.** ``ElementTree``'s default parser discards them,
+        and this file goes back to DIGSI and SEL Architect: an engineer's note
+        beside a setting is content, and dropping it turns every save into a
+        diff on lines nobody touched. They become ordinary children with a
+        non-string ``tag``, which is what :func:`strip_ns` guards.
+
+        The exception is a comment in the PROLOG or the EPILOG -- before
+        ``<SCL>`` or after ``</SCL>``. ``ElementTree`` has no document node,
+        only a root element, so such a comment has nowhere in the tree to
+        attach and is dropped by the parser. A browser's ``DOMParser`` keeps
+        it, because its ``Document`` can hold children beside the root; that
+        is a structural difference, not something a parser flag closes. No
+        file in the reference corpus has one.
         """
         p = Path(path)
         # Before the parser, never after: a DTD's entities expand DURING the
         # parse and there is no half-way to stop at.
         reject_dtd_in_file(p)
-        return cls(ET.parse(str(p)).getroot(), p, _declared_namespaces(p))
+        # A parser instance holds the expat state for ONE document and cannot
+        # be reused, so it is built per call rather than shared at module
+        # level. `insert_comments` is the only target flag set: processing
+        # instructions stay dropped, as no SCL file seen here carries one and
+        # `strip_ns` tolerates the node either way if that changes.
+        parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
+        return cls(ET.parse(str(p), parser).getroot(), p, _declared_namespaces(p))
 
     @classmethod
     def load(cls, path):
@@ -156,10 +209,12 @@ class SclDocument:
 
         This is the seam the round-trip test measures, and today it is exactly
         what ``ElementTree`` does and nothing more. It carries no fidelity
-        guarantee: comments were dropped by the parser long before this is
-        reached, prefixes come back as ``ns0:``, a namespace declared on the
+        guarantee: prefixes come back as ``ns0:``, a namespace declared on the
         root and used nowhere is gone, and the line ending and the XML
-        declaration are the serialiser's rather than the file's.
+        declaration are the serialiser's rather than the file's. Comments do
+        survive -- :meth:`parse` puts them in the tree and the serialiser
+        writes them back -- with the prolog and epilog exception recorded
+        there.
 
         It is private because a name a consumer can reach is a promise, and
         that promise is not true yet. It exists now so that the work which

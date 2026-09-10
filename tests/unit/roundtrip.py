@@ -46,6 +46,12 @@ exception rather than earned. **It normalises nothing else.** In particular
 it does not touch line endings: those are in scope for the fidelity
 guarantee, not a cosmetic difference, and the byte compare is meant to fail
 on them until the writer re-emits them.
+
+The one place line endings ARE normalised is inside
+:attr:`Report.lost_comments`, which matches comment text across the two
+sides. That is not an exception to the above -- the byte compare and the
+line-ending case both still fail on the same CRLF -- it is what keeps the
+comment case answering only whether a comment is still there.
 """
 
 import io
@@ -79,6 +85,33 @@ _SQ_ATTR = re.compile(rb"""([A-Za-z_:][\w:.\-]*)\s*=\s*'([^'"]*)'""")
 _TRAILING_SPACE_EMPTY = re.compile(rb"\s+/>$")
 
 _HEX_REF = re.compile(rb"&#[xX]([0-9A-Fa-f]+);")
+
+# XML's own end-of-line normalisation: `\r\n` and a lone `\r` both become
+# `\n`. See `_eol_normalised`.
+_EOL = re.compile(rb"\r\n|\r")
+
+
+def _eol_normalised(text):
+    """``text`` with XML's mandatory end-of-line normalisation applied.
+
+    Used ONLY by :attr:`Report.lost_comments`, and for one reason: every
+    comment in the corpus spans more than one line. SEL's "This section is
+    overwritten by Architect" banner wraps across three, and all 32 comments
+    in the three vendor files carry a CRLF inside their own text.
+
+    End-of-line normalisation is mandatory in XML and happens inside expat,
+    so those breaks are LF before a tree exists -- exactly as the file's own
+    660,549 line endings are. Comparing comment text raw therefore reported
+    all 32 as LOST on the same line that said "29 in, 29 out", which is both
+    self-contradictory and unactionable: no work on the parser can change it.
+
+    **Nothing is forgiven by normalising here.** The CRLF is still counted
+    twice, by the `line_endings` case and by the byte compare, and neither
+    passes until the writer re-emits the ending it read. This only stops the
+    `comments` case from answering a question that is not its own, so it can
+    answer the one that is: is every comment still in the file.
+    """
+    return _EOL.sub(b"\n", text)
 
 
 def _escape_text(data):
@@ -206,10 +239,15 @@ class Report:
 
     @property
     def lost_comments(self):
-        """The comments that were in the input and are not in the output."""
-        remaining = list(self.after.comments)
+        """The comments that were in the input and are not in the output.
+
+        Matched on text with line endings normalised on both sides --
+        :func:`_eol_normalised` says why that is the comment case's business
+        and not a softening of the guarantee.
+        """
+        remaining = [_eol_normalised(c) for c in self.after.comments]
         lost = []
-        for comment in self.before.comments:
+        for comment in (_eol_normalised(c) for c in self.before.comments):
             if comment in remaining:
                 remaining.remove(comment)
             else:

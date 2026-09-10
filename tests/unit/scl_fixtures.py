@@ -58,6 +58,17 @@ def header(id_="ST1", version="1", revision="1.0", tool_id="test"):
             f'toolID="{tool_id}" nameStructure="IEDName"/>')
 
 
+def comment(text=" note "):
+    """An XML comment. `text` goes between the delimiters verbatim.
+
+    A default with spaces around it, because that is how every file in the
+    reference corpus writes one and the round trip has to reproduce the
+    spacing as well as the words.
+    """
+    assert "--" not in text, "a comment may not contain --"
+    return f"<!--{text}-->"
+
+
 def private(type_, text=""):
     return f'<Private type="{type_}">{text}</Private>'
 
