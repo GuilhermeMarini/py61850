@@ -21,6 +21,9 @@
     undo = doc.apply_edit(SetAttributes(el, {"desc": "52a"}))
     doc.apply_edit(undo)           # and it is the file it was again
 
+    edit = subscribe(doc, Connection(ext_ref, fcda, control_block))
+    doc.apply_edit(edit)           # several primitives, one history entry
+
 **Reading is not the whole of it: a document written back out is the file it
 came from.** ``SclDocument.to_bytes`` and ``SclDocument.write`` hold a
 fidelity guarantee -- comments, indentation, attribute order, namespace
@@ -88,6 +91,19 @@ from .document import (
     privates_of,
     strip_ns,
 )
+from .extref import (
+    Connection,
+    TypeRestriction,
+    ext_ref_type_restrictions,
+    fcda_meets_ext_ref_restrictions,
+    fcda_type,
+    is_subscribed,
+    match_data_attributes,
+    match_src_attributes,
+    source_control_block,
+    subscribe,
+    unsubscribe,
+)
 from .edit import (
     EditRejected,
     Insert,
@@ -124,4 +140,8 @@ __all__ = [
     "strip_ns", "iter_local", "children_local", "privates_of",
     "Insert", "Remove", "SetAttributes", "SetTextContent", "EditRejected",
     "reference_for", "may_contain", "content_model",
+    "Connection", "TypeRestriction", "subscribe", "unsubscribe",
+    "is_subscribed", "fcda_meets_ext_ref_restrictions",
+    "ext_ref_type_restrictions", "fcda_type",
+    "match_data_attributes", "match_src_attributes", "source_control_block",
 ]

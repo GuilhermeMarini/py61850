@@ -39,6 +39,11 @@ class TestSurface(unittest.TestCase):
             "Insert", "Remove", "SetAttributes", "SetTextContent",
             "EditRejected",
             "reference_for", "may_contain", "content_model",
+            "Connection", "TypeRestriction", "subscribe", "unsubscribe",
+            "is_subscribed", "fcda_meets_ext_ref_restrictions",
+            "ext_ref_type_restrictions", "fcda_type",
+            "match_data_attributes", "match_src_attributes",
+            "source_control_block",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

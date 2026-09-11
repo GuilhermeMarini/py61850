@@ -29,10 +29,14 @@ _CONTROL_BLOCK_TAGS = ("ReportControl", "GSEControl", "SampledValueControl",
 class FCDA:
     """One dataset member: a functionally-constrained data attribute."""
 
-    __slots__ = ("ld_inst", "prefix", "ln_class", "ln_inst", "do_name",
-                 "da_name", "fc")
+    __slots__ = ("element", "ld_inst", "prefix", "ln_class", "ln_inst",
+                 "do_name", "da_name", "fc")
 
     def __init__(self, el):
+        #: The live element. Every capability in :mod:`py61850.scl.extref`
+        #: takes elements, as the reference implementation does, so a caller
+        #: that found this member through the model can hand it straight over.
+        self.element = el
         self.ld_inst = el.get("ldInst") or ""
         self.prefix = el.get("prefix") or ""
         self.ln_class = el.get("lnClass") or ""
@@ -164,9 +168,13 @@ class ExtRef:
     __slots__ = ("ied_name", "ld_inst", "prefix", "ln_class", "ln_inst",
                  "do_name", "da_name", "service_type", "src_ld_inst",
                  "src_prefix", "src_ln_class", "src_ln_inst", "src_cb_name",
-                 "int_addr", "desc", "privates", "logical_node")
+                 "int_addr", "desc", "privates", "logical_node", "element")
 
     def __init__(self, el, logical_node):
+        #: The live element -- see :attr:`FCDA.element`. The attributes below
+        #: are read once, here, so a list obtained before an edit reports what
+        #: the file said before it; the element itself is always current.
+        self.element = el
         self.ied_name = el.get("iedName")
         self.ld_inst = el.get("ldInst")
         self.prefix = el.get("prefix")
