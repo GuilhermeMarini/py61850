@@ -1,9 +1,17 @@
 Third-party notice: IEC code components
 =======================================
 
-One file in this distribution is DERIVED from an IEC code component:
+Two files in this distribution are DERIVED from IEC code components:
 
     src/py61850/scl/_content_models.py
+    src/py61850/scl/_nsd_types.py
+
+Neither code component is itself part of this distribution, and each derived
+file takes one narrow dimension of the component it came from.
+
+
+1. src/py61850/scl/_content_models.py
+-------------------------------------
 
 It carries the SCL content models -- which child elements each SCL element may
 hold, and the order they go in -- extracted from the SCL XML schema published
@@ -34,6 +42,48 @@ The copyright notice carried by that code component:
     has to be taken into account to have a full description of this code
     component.
     See www.iec.ch/CCv1 for copyright details.
+
+
+2. src/py61850/scl/_nsd_types.py
+--------------------------------
+
+It carries two facts about the IEC 61850 data model -- which common data class
+each data object name has, and which basic type each of a class's data
+attributes has -- extracted from the namespace definitions published by IEC as
+code components of IEC 61850-7-4 and IEC 61850-7-3. The namespace definitions
+themselves are NOT part of this distribution. What is derived from them is the
+type dimension alone, and none of their functional constraints, presence
+conditions, enumerations and their literals, abbreviations, service parameters,
+UML identifiers or documentation.
+
+Attribution, as the licence below requires:
+
+    This code was derived from IEC 61850-7-3:2010 and IEC 61850-7-4:2020 within
+    modifications permitted in the relevant IEC standard. Please reproduce this
+    note if possible.
+
+The code components it was derived from:
+
+    IEC 61850-7-3 namespace definition V2007B5
+    Code component id: IEC 61850-7-3:2007B5
+    Publication: IEC 61850-7-3:2010 (Ed. 2.1), dated 2024-02-12
+
+    IEC 61850-7-4 namespace definition V2007B5
+    Code component id: IEC 61850-7-4:2007B5
+    Publication: IEC 61850-7-4:2020 (Ed. 2.1), dated 2024-02-14
+
+The copyright notice carried by those code components:
+
+    COPYRIGHT (c) IEC, www.iec.ch/tc57/supportdocuments. This version of this
+    NSD is part of IEC_61850-7-3:2010 Edition 2.1 [respectively
+    IEC_61850-7-4:2020 Edition 2.1]; see that publication for full legal
+    notices. In case of any differences between the here-below code and the IEC
+    published content, the here-below definition supersedes the IEC
+    publication; it may contain updates. See history files. The whole document
+    has to be taken into account to have a full description of this code
+    component.
+    See www.iec.ch/CCv1 for copyright details.
+
 
 py61850 is not endorsed by, affiliated with, or approved by IEC.
 
@@ -90,4 +140,5 @@ Everything else in this distribution
 
 Licensed under AGPL-3.0-or-later; see LICENSE. A commercial licence is
 available from the copyright holder -- see COMMERCIAL.md. The terms above
-apply to the derived file named at the top of this notice, and travel with it.
+apply to the derived files named at the top of this notice, and travel with
+them.

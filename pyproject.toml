@@ -9,8 +9,8 @@ description = "Pure-Python IEC 61850 toolkit — MMS (ISO 9506) client today; GO
 readme = "README.md"
 requires-python = ">=3.9"
 license = "AGPL-3.0-or-later"
-# NOTICE-IEC.txt travels with every wheel and sdist because one generated file
-# is derived from an IEC code component, whose licence requires the notice, the
+# NOTICE-IEC.txt travels with every wheel and sdist because two generated files
+# are derived from IEC code components, whose licence requires the notice, the
 # conditions and the disclaimer to be retained in redistributions of software.
 license-files = ["LICENSE", "NOTICE-IEC.txt"]
 # Dual-licensed: AGPL-3.0-or-later for everyone, or a commercial licence from
