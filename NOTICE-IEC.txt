@@ -1,0 +1,93 @@
+Third-party notice: IEC code components
+=======================================
+
+One file in this distribution is DERIVED from an IEC code component:
+
+    src/py61850/scl/_content_models.py
+
+It carries the SCL content models -- which child elements each SCL element may
+hold, and the order they go in -- extracted from the SCL XML schema published
+by IEC as a code component of IEC 61850-6. The schema itself is NOT part of
+this distribution. What is derived from it is one structural dimension: element
+names and their order, and none of the schema's attributes, types,
+enumerations, cardinalities, uniqueness constraints or documentation.
+
+Attribution, as the licence below requires:
+
+    This code was derived from IEC 61850-6:2009/AMD1:2018 within modifications
+    permitted in the relevant IEC standard. Please reproduce this note if
+    possible.
+
+The code component it was derived from:
+
+    IEC 61850-6 SCL schema V2007B4
+    Code component id: IEC_61850-6.2007B4.SCL.XSD
+    Publication: IEC 61850-6:2009/AMD1:2018 (Ed. 2.1), dated 2018-01-22
+
+The copyright notice carried by that code component:
+
+    COPYRIGHT (c) IEC, 2018. This version of this XSD is part of
+    IEC 61850-6:2009/AMD1:2018; see the IEC 61850-6:2009/AMD1:2018 for full
+    legal notices. In case of any differences between the here-below code and
+    the IEC published content, the here-below definition supersedes the IEC
+    publication; it may contain updates. See history files. The whole document
+    has to be taken into account to have a full description of this code
+    component.
+    See www.iec.ch/CCv1 for copyright details.
+
+py61850 is not endorsed by, affiliated with, or approved by IEC.
+
+
+Code Components -- End-user licence agreement
+---------------------------------------------
+
+Reproduced from www.iec.ch/CCv1, which the code component's manifest names as
+its licence.
+
+Code Components in IEC standards (International Standards, Technical
+Specifications or Technical Reports) which have been identified and approved
+for licensing, are licensed subject to the following conditions:
+
+- Redistributions of software must retain the Copyright Notice, this list of
+  conditions and the disclaimer below ("Disclaimer").
+- The software license extends to modifications permitted under the relevant
+  IEC standard.
+- The software license extends to clarifications and corrections approved by
+  IEC.
+- Neither the name of IEC, nor the names of specific contributors, may be used
+  to endorse or promote products derived from this software without specific
+  prior written permission. The relevant IEC standard may be referenced when
+  claiming compliance with the relevant IEC standard.
+- The user of Code Components shall attribute each such Code Component to IEC
+  and identify the IEC standard from which it is taken. Such attribution (e.g.,
+  "This code was derived from IEC [insert standard reference number:publication
+  year] within modifications permitted in the relevant IEC standard. Please
+  reproduce this note if possible."), may be placed in the code itself or any
+  other reasonable location.
+
+Code Components means components included in IEC standards that are intended to
+be directly processed by a computer and also includes any text found between
+the markers <CODE BEGINS> and <CODE ENDS>, or otherwise clearly labeled in this
+standard as a Code Component.
+
+The Disclaimer is:
+
+EACH OF THE CODE COMPONENTS IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THE CODE COMPONENTS, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.
+
+
+Everything else in this distribution
+------------------------------------
+
+Licensed under AGPL-3.0-or-later; see LICENSE. A commercial licence is
+available from the copyright holder -- see COMMERCIAL.md. The terms above
+apply to the derived file named at the top of this notice, and travel with it.

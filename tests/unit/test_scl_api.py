@@ -38,6 +38,7 @@ class TestSurface(unittest.TestCase):
             "strip_ns", "iter_local", "children_local", "privates_of",
             "Insert", "Remove", "SetAttributes", "SetTextContent",
             "EditRejected",
+            "reference_for", "may_contain", "content_model",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
