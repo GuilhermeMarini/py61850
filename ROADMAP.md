@@ -120,6 +120,27 @@ Make the client dependable enough for unattended fleet jobs to build on.
 
 ---
 
+## 0.4 — The SCL round trip ✅
+
+Turns a read-only reader into a read-write one. The model is unchanged; what
+is new is that a document can go back out as the file it came from.
+
+- ✅ **Comment-preserving parse** — `insert_comments` on the tree builder, and
+      every walk in the package tolerates a node whose `tag` is a factory
+      rather than a name. An engineer's note beside a setting is content.
+- ✅ **Namespace fidelity** — prefixes are the document's own, and a
+      declaration the file carries but nothing uses is re-emitted. `sxy:`
+      coordinates are read by DIGSI and SEL Architect to draw a single-line
+      diagram; losing that declaration would damage one silently.
+- ✅ **`SclDocument.to_bytes` / `.write`** — the public write API, atomic on a
+      real path, with the fidelity guarantee and its five cosmetic exceptions
+      stated where a consumer reads them.
+- ✅ **The round-trip test** — four station exports, 44 MB, parsed and written
+      with no edit and compared at the level of bytes. The comparison names
+      what differed rather than that something did.
+
+---
+
 ## 1.0 — MMS simulation 🧭
 
 **Goal:** read an SCL file (`.scd` / `.cid` / `.icd`) and stand up a virtual IED

@@ -91,7 +91,7 @@ class _Base(unittest.TestCase):
 
     def out(self, text):
         """The document's own serialisation, as text."""
-        return self.doc(text)._to_bytes().decode("utf-8")
+        return self.doc(text).to_bytes().decode("utf-8")
 
 
 class TestDeclarationsSurvive(_Base):
@@ -141,8 +141,8 @@ class TestDeclarationsSurvive(_Base):
         being counted as used on the next one.
         """
         d = self.doc(_root([("", SCL), ("sel", SEL)], '<Substation name="S1"/>'))
-        self.assertEqual(d._to_bytes(), d._to_bytes())
-        self.assertIn(f'xmlns:sel="{SEL}"'.encode(), d._to_bytes())
+        self.assertEqual(d.to_bytes(), d.to_bytes())
+        self.assertIn(f'xmlns:sel="{SEL}"'.encode(), d.to_bytes())
 
     def test_two_documents_keep_their_own_prefix_for_one_uri(self):
         """The corpus writes the SEL namespace `esel:`; `namespaces.scd` writes it
@@ -182,7 +182,7 @@ class TestTheTreeIsNotMutated(_Base):
     def test_no_xmlns_attribute_is_left_on_the_root(self):
         d = self.doc(_root([("", SCL), ("sel", SEL)], '<Substation name="S1"/>'))
         before = dict(d.root.attrib)
-        d._to_bytes()
+        d.to_bytes()
         self.assertEqual(before, dict(d.root.attrib))
         self.assertEqual([], [k for k in d.root.attrib if k.startswith("xmlns")])
 
@@ -295,13 +295,13 @@ class TestTheRefusedShapes(_Base):
 
 
 class TestTheDeclarationScanner(_Base):
-    """`_declared_namespaces` and the URI view built on top of it."""
+    """`_source_layout`'s declarations, and the URI view built on top of them."""
 
     def test_prefix_and_uri_are_both_recovered(self):
         d = self.doc(_root([("", SCL), ("sxy", SXY), ("sel", SEL)],
                            '<Substation name="S1"/>'))
         self.assertEqual((("", SCL), ("sxy", SXY), ("sel", SEL)),
-                         d._declarations)
+                         d._layout.declarations)
 
     def test_namespaces_is_still_uris_in_first_seen_order(self):
         """The public property's contract is unchanged.

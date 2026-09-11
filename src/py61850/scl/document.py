@@ -28,12 +28,16 @@ would silently return nothing for either.
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import io
 import logging
+import os
 import re
+import tempfile
 import threading
 from pathlib import Path
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_file
@@ -47,6 +51,43 @@ _logger = logging.getLogger(__name__)
 # and this is the only place that still knows what it was.
 _NS_DECL = re.compile(
     br"""xmlns(?::([A-Za-z0-9_.-]+))?\s*=\s*["']([^"']+)["']""")
+
+# The XML declaration, and the first start tag after the prolog. Both are read
+# from the file's own bytes for the same reason the declarations above are:
+# `ElementTree` keeps neither, and the writer has to put both back.
+_DECLARATION = re.compile(br"<\?xml.*?\?>", re.S)
+_PROLOG_ITEM = re.compile(br"<\?.*?\?>|<!--.*?-->|<!\[[^]]*\]\]>|<![^>]*>", re.S)
+_START_TAG = re.compile(
+    br"""<([^\s/>]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(/?)>""")
+_ATTRIBUTE = re.compile(
+    br"""([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+# `encoding="..."` inside a declaration, with the VALUE's span captured so it
+# can be replaced without disturbing the quote style around it.
+_ENCODING = re.compile(br"""(encoding\s*=\s*["'])([^"']*)(["'])""")
+
+
+class _SourceLayout(NamedTuple):
+    """How the file was written, as opposed to what it says.
+
+    Five facts that XML parsing destroys and that the fidelity guarantee is
+    about. `ElementTree` keeps none of them: expat consumes the prolog before
+    a tree exists, normalises every line ending on the way past, and hands
+    back an element whose attributes have lost the order they were written in
+    only for the ROOT -- where the serialiser re-sorts them around the
+    declarations it generates.
+
+    Defaults describe a document that was never read from a file at all --
+    one built around a hand-made root. It gets `ElementTree`'s own habits:
+    LF, no declaration, no trailing newline, and whatever attribute order the
+    tree happens to carry.
+    """
+
+    declarations: tuple = ()        # (prefix, uri) pairs, first-seen order
+    declaration: bytes = b""        # the XML declaration verbatim; b"" for none
+    bom: bytes = b""                # a byte-order mark, if the file opened with one
+    eol: bytes = b"\n"              # the ending the file is mostly written with
+    final_newline: bool = False     # whether the last line was terminated
+    root_attributes: tuple = ()     # the root's attribute NAMES, in written order
 
 
 def strip_ns(tag) -> str:
@@ -150,15 +191,15 @@ class Header:
 class SclDocument:
     """One SCL file. Cheap to construct; the expensive parts are lazy."""
 
-    __slots__ = ("root", "path", "_declarations", "_header", "_cache")
+    __slots__ = ("root", "path", "_layout", "_header", "_cache")
 
-    def __init__(self, root: ET.Element, path=None, declarations=()) -> None:
+    def __init__(self, root: ET.Element, path=None, layout=None) -> None:
         self.root = root
         self.path = path
-        # `(prefix, uri)` pairs as the file wrote them -- see
-        # `_declared_namespaces`. Kept whole rather than reduced to URIs
-        # because the prefix is half of what `_to_bytes` has to put back.
-        self._declarations = tuple(declarations)
+        # How the file was written -- see `_SourceLayout` and `_source_layout`.
+        # One object rather than five attributes because it is one thing, and
+        # because :meth:`to_bytes` consumes all five together.
+        self._layout = layout if layout is not None else _SourceLayout()
         self._header = False        # sentinel: not looked up yet
         self._cache: dict = {}
 
@@ -196,7 +237,7 @@ class SclDocument:
         # instructions stay dropped, as no SCL file seen here carries one and
         # `strip_ns` tolerates the node either way if that changes.
         parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
-        return cls(ET.parse(str(p), parser).getroot(), p, _declared_namespaces(p))
+        return cls(ET.parse(str(p), parser).getroot(), p, _source_layout(p))
 
     @classmethod
     def load(cls, path):
@@ -215,39 +256,112 @@ class SclDocument:
 
     # -- serialisation ------------------------------------------------------
 
-    def _to_bytes(self) -> bytes:
-        """The document as bytes -- **private, until the guarantee is true**.
+    def to_bytes(self) -> bytes:
+        """The document as bytes: the file it was parsed from, as near as XML allows.
 
-        This is the seam the round-trip test measures. **Three of the six
-        things that have to survive now do:** comments, because :meth:`parse`
-        keeps them in the tree; the document's own namespace PREFIXES; and
-        every ``xmlns`` declaration the root carried, **including the ones
-        nothing uses**. :func:`_document_prefixes` is the last two of those.
+        **The guarantee.** A document parsed and written back with **no edit
+        applied** is the file it came from, byte for byte, with five
+        exceptions -- none of which any consumer can observe through an XML
+        parser, and all of which are `ElementTree` limits rather than choices:
 
-        **The other three are the writer's**, and
-        ``tests/unit/test_scl_roundtrip.py`` names each against every fixture:
+        1. **Attribute quote style.** ``a='1'`` comes back ``a="1"``. The
+           serialiser writes double quotes and offers no say in it.
+        2. **Empty-element spacing.** ``<X/>`` comes back ``<X />``.
+        3. **Empty-element form.** ``<X></X>`` comes back ``<X />``. Expat
+           reports no character data for either spelling, so both arrive as
+           one element with ``text`` of ``None`` and nothing downstream can
+           tell them apart. A file is not usually consistent about this
+           itself: the reference SEL export writes 115,576 empty elements as
+           ``<X />`` and 72 as ``<X></X>``, some of them lines apart.
+        4. **CDATA boundaries.** ``<![CDATA[a<b]]>`` comes back ``a&lt;b``,
+           for the same reason -- expat reports the content as ordinary
+           character data and the boundary never reaches the tree.
+        5. **Numeric character references.** ``&#xA;`` comes back ``&#10;``.
+           The escaper writes the decimal form and the spelling is not
+           configurable.
 
-        1. the line ending is ``ElementTree``'s LF, not the file's own;
-        2. the XML declaration is written with single quotes and a
-           lower-cased encoding name;
-        3. the ROOT's attribute order, which shows up in nothing but the byte
-           compare. ``ElementTree`` emits the declarations it generates ahead
-           of every ordinary attribute, and the unused ones this re-emits
-           land after them all; a real file interleaves the two. No other
-           element is affected -- attribute order is preserved everywhere
-           ``ElementTree`` is not also emitting a declaration.
+        **Everything else survives**: comments, indentation, attribute order,
+        namespace prefixes, ``xmlns`` declarations nothing uses, the line
+        ending the file was written with, its trailing newline if it had one,
+        its byte-order mark if it had one, and the XML declaration spelled as
+        the file spelled it. ``tests/unit/test_scl_roundtrip.py`` holds that
+        claim against four real station exports, 44 MB of them, at the level
+        of bytes.
 
-        It is private because a name a consumer can reach is a promise, and
-        that promise is not true yet. It exists now so that the work which
-        makes it true has one call site to improve rather than a call site to
-        move. When the list is empty this becomes the public write API, with
-        the guarantee and its cosmetic exceptions written into its docstring.
+        **One thing is deliberately not reproduced**: an encoding declaration
+        naming anything but UTF-8. Expat decodes the file, this writes UTF-8,
+        and re-emitting ``encoding="ISO-8859-1"`` over UTF-8 bytes would hand
+        back a file that no longer parses. The quote style is kept and the
+        name alone is corrected; nothing else in the declaration is touched.
+        Fidelity that produces an unreadable file is not fidelity.
         """
         buf = io.BytesIO()
-        with _document_prefixes(self.root, self._declarations):
+        with _document_prefixes(self.root, self._layout.declarations):
+            # `xml_declaration=False`: `ElementTree` spells one with single
+            # quotes and a lower-cased encoding name, and the file's own
+            # spelling is recorded. It goes back on below.
             ET.ElementTree(self.root).write(
-                buf, encoding="utf-8", xml_declaration=True)
-        return buf.getvalue()
+                buf, encoding="utf-8", xml_declaration=False)
+        data = _reorder_root_attributes(buf.getvalue(),
+                                        self._layout.root_attributes)
+        declaration = _reconcile_declaration(self._layout.declaration)
+        if declaration:
+            data = declaration + b"\n" + data
+        if self._layout.bom:
+            data = self._layout.bom + data
+        if self._layout.final_newline:
+            # `ElementTree` writes none: the root element has no tail, because
+            # whitespace after the document element is not character data and
+            # never reaches the tree.
+            data += b"\n"
+        if self._layout.eol != b"\n":
+            # Last, and over the whole document. XML end-of-line
+            # normalisation happens inside expat, so every `\r\n` the file was
+            # written with is already an LF before a tree exists and there is
+            # nothing left to tell one newline from another -- re-emitting
+            # them one at a time is not an option the tree can support.
+            #
+            # `ElementTree` emits no bare `\r` for this to collide with: it
+            # escapes one in an attribute value as `&#13;`. The single shape
+            # this rewrites wrongly is a `&#xD;` or `&#xA;` character
+            # reference in element TEXT -- exempt from end-of-line
+            # normalisation, so it reaches the tree as a real newline and
+            # comes back out as one. No corpus file carries one; the 23 in
+            # the SEL export are all inside attribute values, where the
+            # escaper puts them back as references. The round-trip test is
+            # what says so the day a fixture disagrees.
+            data = data.replace(b"\n", self._layout.eol)
+        return data
+
+    def write(self, path) -> None:
+        """Write the document to ``path``, atomically.
+
+        The bytes are :meth:`to_bytes` and carry its guarantee.
+
+        They are built in a temporary file beside the destination and only
+        then ``os.replace``d onto it, so a failure anywhere -- a full disk, a
+        serialisation that raises, an interrupt -- leaves the destination
+        exactly as it was, whether that is absent or the SCD that was there
+        before. ``cfbwrite`` writes an RDB the same way for the same reason:
+        the file goes back into a vendor tool, and a half-written one is
+        worse than none at all.
+
+        An existing file is replaced without asking, and nothing is read back.
+        """
+        data = self.to_bytes()
+        dst = Path(path)
+        fd, tmp_name = tempfile.mkstemp(dir=str(dst.parent),
+                                        prefix=f".{dst.name}.", suffix=".scl-tmp")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            tmp.write_bytes(data)
+            # mkstemp opens at 0600; the finished SCD is an ordinary file.
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, dst)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     # -- shallow facts ------------------------------------------------------
 
@@ -257,12 +371,12 @@ class SclDocument:
 
         URIs only, in first-seen order and de-duplicated, which is what a
         consumer asking "does this file speak Siedig?" wants. The prefixes
-        each was declared under are :attr:`_declarations`, and they are
+        each was declared under are :attr:`_layout`, and they are
         private: nothing outside serialisation has needed one yet, and a name
         a consumer can reach is a promise.
         """
         uris = []
-        for _, uri in self._declarations:
+        for _, uri in self._layout.declarations:
             if uri not in uris:
                 uris.append(uri)
         return tuple(uris)
@@ -500,7 +614,7 @@ def _document_prefixes(root: ET.Element, declarations):
       immediately before every write. What it would break is every OTHER
       `ElementTree` user in the process -- code that is not a consumer of
       this package at all -- and any document whose declarations are past the
-      64 kB `_declared_namespaces` scans, which has nothing of its own to
+      64 kB `_source_layout` scans, which has nothing of its own to
       re-register and would inherit a stranger's prefix;
     - the literal attributes are removed, so a caller that reads
       ``doc.root.attrib`` never sees an entry that is not an attribute. The
@@ -571,35 +685,186 @@ def _document_prefixes(root: ET.Element, declarations):
                 _NS_MAP.update(snapshot)
 
 
-def _declared_namespaces(path: Path) -> tuple:
-    """Every ``xmlns`` declaration in the file, as ``(prefix, uri)`` pairs.
+def _reconcile_declaration(declaration: bytes) -> bytes:
+    """The file's own XML declaration, with a non-UTF-8 encoding name corrected.
 
-    In first-seen order, with ``""`` for the default namespace. Duplicates of
-    the WHOLE PAIR are dropped; the same URI under two prefixes is kept twice,
-    because those are two declarations and the fidelity guarantee is about
-    both of them.
+    Verbatim is the answer for every declaration in the corpus and for every
+    one this is ever likely to meet: the four fixtures spell the encoding
+    `UTF-8` three times and `utf-8` once, both double-quoted, where
+    `ElementTree` would write `<?xml version='1.0' encoding='utf-8'?>` for
+    all four.
 
-    ``ElementTree`` discards prefix declarations when it builds the tree --
-    an element's tag comes back as ``{uri}Local`` and the prefix that was
-    written is gone -- so both halves are recovered from the bytes here. This
-    is the only thing in the package that knows the document's own spelling
-    of its namespaces, and :meth:`SclDocument._to_bytes` is what consumes it.
+    The exception is the one case where reproducing the file would break it.
+    Expat decodes whatever the file declared; :meth:`SclDocument.to_bytes`
+    writes UTF-8. A declaration that still said `windows-1252` over UTF-8
+    bytes would describe the file wrongly, and the next tool to open it would
+    either fail or read mojibake. So the NAME is replaced and everything
+    around it -- the quote style, the version, a `standalone` attribute,
+    the spacing -- is left exactly as it was.
 
-    Only the first 64 kB is scanned: SCL declares its namespaces on the root
-    element, and a file that declares one a megabyte in is not a file this
-    reader is trying to serve. All four corpus fixtures declare every one of
-    theirs on the root and nowhere else -- the largest is 23.5 MB and its
-    declarations are on line 2.
+    `codecs.lookup` is what decides, rather than a list of spellings, so
+    `utf8`, `UTF_8` and `U8` are all recognised as the same encoding and left
+    alone. An encoding Python does not know is treated as not-UTF-8, which is
+    the safe direction: the bytes really are UTF-8.
     """
-    seen = []
+    if not declaration:
+        return b""
+    match = _ENCODING.search(declaration)
+    if match is None:
+        # No encoding declared. UTF-8 is XML's default for a file without
+        # one, so the declaration is already true of what is written.
+        return declaration
+    try:
+        is_utf8 = codecs.lookup(
+            match.group(2).decode("ascii", "replace")).name == "utf-8"
+    except LookupError:
+        is_utf8 = False
+    if is_utf8:
+        return declaration
+    return (declaration[:match.start(2)] + b"utf-8"
+            + declaration[match.end(2):])
+
+
+def _reorder_root_attributes(data: bytes, order) -> bytes:
+    """``data`` with the root's attributes back in the order the file wrote them.
+
+    **The root is the one element `ElementTree` reorders**, and it does so
+    because it is the one element it adds attributes to: the namespace
+    declarations it generates are written first, sorted by prefix, ahead of
+    every ordinary attribute. The declarations :func:`_document_prefixes`
+    re-emits as literal attributes land after them all. A real file
+    interleaves the two and no fixture survives the split -- the SEL export
+    opens ``<SCL xmlns:esel=... version=... xmlns=...>``, with the default
+    declaration LAST.
+
+    There is no hook for this inside the serialiser, so it is done to the
+    bytes afterwards, to one tag. That is cheap and it is bounded: the tag is
+    at offset 0, because the declaration has not been prepended yet and a
+    comment in the prolog never reaches the tree.
+
+    **Attributes not in ``order`` keep their place after those that are.**
+    That is what an edit adding an attribute produces, and appending it is
+    the only answer that does not pretend to know where the file would have
+    put it. A recorded name the output no longer has is simply absent -- an
+    edit removed it.
+
+    Nothing happens at all when ``order`` is empty -- a document not read
+    from a file, or one whose root tag ran past the 64 kB
+    :func:`_source_layout` scans -- and `ElementTree`'s order stands.
+    """
+    if not order:
+        return data
+    match = _START_TAG.match(data)
+    if match is None:                   # not a start tag: nothing to reorder
+        return data
+    written = []
+    for attr in _ATTRIBUTE.finditer(match.group(2)):
+        value = attr.group(2) if attr.group(2) is not None else attr.group(3)
+        written.append((attr.group(1), value))
+    by_name = dict(written)
+    if len(by_name) != len(written):
+        # Two attributes of one name is not XML, and a tree that produced it
+        # is not one to tidy up. Left exactly as the serialiser wrote it.
+        return data
+    sequence = [name for name in order if name in by_name]
+    sequence += [name for name, _ in written if name not in order]
+    rebuilt = b"<" + match.group(1) + b"".join(
+        b' %s="%s"' % (name, by_name[name]) for name in sequence)
+    # `ElementTree` writes an empty element as `<X />`; keep that spacing
+    # rather than inventing a difference this function was not asked about.
+    rebuilt += b" />" if match.group(3) else b">"
+    return rebuilt + data[match.end():]
+
+
+def _source_layout(path: Path) -> _SourceLayout:
+    """How ``path`` was written, as :class:`_SourceLayout` -- five facts XML loses.
+
+    **The declarations** are every ``xmlns`` in the file, as ``(prefix, uri)``
+    pairs, in first-seen order, with ``""`` for the default namespace.
+    Duplicates of the WHOLE PAIR are dropped; the same URI under two prefixes
+    is kept twice, because those are two declarations and the fidelity
+    guarantee is about both of them. ``ElementTree`` discards prefix
+    declarations when it builds the tree -- an element's tag comes back as
+    ``{uri}Local`` and the prefix that was written is gone -- so both halves
+    are recovered from the bytes here.
+
+    **The XML declaration** and **the root's attribute names** are read the
+    same way and for the same reason: expat consumes the prolog before a tree
+    exists, and the serialiser re-sorts the root's attributes around the
+    declarations it generates.
+
+    **The line ending** is whichever of CRLF and LF is commoner in the head,
+    LF on a tie or a file with no line break at all. End-of-line
+    normalisation is mandatory in XML and happens inside expat, so this is
+    the only place the file's own ending is still visible. **The final
+    newline** is the one fact read from the end of the file rather than the
+    head -- one byte, one seek.
+
+    Only the first 64 kB is scanned, as in a file that declares a namespace a
+    megabyte in is not a file this reader is trying to serve. All four corpus
+    fixtures declare every namespace on the root and nowhere else; the
+    largest is 23.5 MB and its declarations are on line 2. A root start tag
+    that ran past the window would come back with no attribute order, and
+    :func:`_reorder_root_attributes` would leave the serialiser's order
+    alone -- degraded, not wrong.
+
+    An unreadable file gives the default layout rather than raising:
+    :meth:`SclDocument.parse` has already opened it once by the time this
+    runs, and a document that serialises with `ElementTree`'s own habits is a
+    better answer here than a second, different exception.
+    """
     try:
         with open(path, "rb") as fh:
             head = fh.read(65536)
+            if fh.seek(0, os.SEEK_END):
+                fh.seek(-1, os.SEEK_END)
+                final_newline = fh.read(1) == b"\n"
+            else:
+                final_newline = False   # an empty file ends no line
     except OSError:
-        return ()
+        return _SourceLayout()
+
+    seen = []
     for prefix, uri in _NS_DECL.findall(head):
         pair = (prefix.decode("utf-8", "replace"),
                 uri.decode("utf-8", "replace"))
         if pair not in seen:
             seen.append(pair)
-    return tuple(seen)
+
+    # A byte-order mark is not content and never reaches the tree, so it is
+    # recorded here or it is lost. It also has to be stepped over before
+    # anything else in the prolog can be recognised.
+    bom = codecs.BOM_UTF8 if head.startswith(codecs.BOM_UTF8) else b""
+    pos = len(bom)
+    declaration = _DECLARATION.match(head, pos)
+
+    crlf = head.count(b"\r\n")
+    lf = head.count(b"\n") - crlf
+
+    return _SourceLayout(
+        declarations=tuple(seen),
+        declaration=declaration.group() if declaration else b"",
+        bom=bom,
+        eol=b"\r\n" if crlf > lf else b"\n",
+        final_newline=final_newline,
+        root_attributes=_root_attribute_names(head, pos),
+    )
+
+
+def _root_attribute_names(head: bytes, pos: int) -> tuple:
+    """The root start tag's attribute NAMES, in the order the file wrote them.
+
+    Values are not recorded: they are in the tree, and the tree is what the
+    writer serialises. Only the order is lost, and only for this one element.
+    """
+    while True:
+        while head[pos:pos + 1].isspace():
+            pos += 1
+        item = _PROLOG_ITEM.match(head, pos)
+        if item is None:
+            break
+        pos = item.end()
+    match = _START_TAG.match(head, pos)
+    if match is None:
+        return ()
+    return tuple(attr.group(1) for attr in _ATTRIBUTE.finditer(match.group(2)))

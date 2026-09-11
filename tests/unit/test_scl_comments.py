@@ -245,8 +245,8 @@ class TestTheCommentsAreInTheTree(_Base):
 
     def test_they_are_written_back_out(self):
         d = self.doc(_station(fx.comment(NOTE)))
-        self.assertEqual(INSERTED, d._to_bytes().count(b"<!--"))
-        self.assertIn(NOTE.encode(), d._to_bytes())
+        self.assertEqual(INSERTED, d.to_bytes().count(b"<!--"))
+        self.assertIn(NOTE.encode(), d.to_bytes())
 
 
 class TestTheTraversalsSkipThem(_Base):
@@ -315,17 +315,17 @@ class TestOutsideTheRoot(_Base):
         d = self.doc(declaration + "\n" + fx.comment(NOTE) + "\n" + rest)
         self.assertEqual([], [el for el in d.root.iter()
                               if not isinstance(el.tag, str)])
-        self.assertNotIn(b"<!--", d._to_bytes())
+        self.assertNotIn(b"<!--", d.to_bytes())
 
     def test_a_comment_after_the_root_is_dropped(self):
         d = self.doc(fx.scl(fx.header()) + fx.comment(NOTE) + "\n")
-        self.assertNotIn(b"<!--", d._to_bytes())
+        self.assertNotIn(b"<!--", d.to_bytes())
 
     def test_a_comment_inside_the_root_is_kept(self):
         # The contrast that makes the two above a statement about POSITION
         # rather than about comments.
         d = self.doc(fx.scl(fx.comment(NOTE), fx.header()))
-        self.assertIn(b"<!--", d._to_bytes())
+        self.assertIn(b"<!--", d.to_bytes())
 
 
 if __name__ == "__main__":
