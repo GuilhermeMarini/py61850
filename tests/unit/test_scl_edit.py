@@ -266,6 +266,32 @@ class TestAttributeOrderSurvivesAnUndo(_Base):
         self.doc.apply_edit(SetAttributes(extref, {"desc": "b", "intAddr": "a"}))
         self.assertEqual(list(extref.attrib), ["desc", "intAddr"])
 
+    def test_a_complete_description_inverts_into_the_order_it_found(self):
+        """The case the test above stops one line short of.
+
+        Applying a complete description reorders; UNDOING one has to put the
+        order back, and the inverse can only do that if it describes the
+        element as the element was rather than as the edit was. Found by the
+        invertibility property test, on all five of its seeds, within thirty
+        edits -- values restored and the file different, which is exactly the
+        shape Q13 exists for.
+        """
+        extref = self.all("ExtRef")[1]
+        self.assertEqual(list(extref.attrib), ["intAddr", "desc"])
+        undo = self.doc.apply_edit(
+            SetAttributes(extref, {"desc": "b", "intAddr": "a"}))
+        self.assertEqual(list(undo.attributes), ["intAddr", "desc"])
+        self.doc.apply_edit(undo)
+        self.assertEqual(list(extref.attrib), ["intAddr", "desc"])
+        self.assertUnchanged()
+
+    def test_a_values_only_edit_naming_every_attribute_still_inverts(self):
+        """The same rule where it is easiest to miss: nothing is added and
+        nothing is deleted, so the key set never changes -- and the edit is
+        still a complete description, because it happens to name them all."""
+        extref = self.all("ExtRef")[1]
+        self.roundTrip(SetAttributes(extref, {"desc": "b", "intAddr": "a"}))
+
     def test_a_partial_description_leaves_the_order_alone(self):
         extref = self.one("ExtRef")
         before = list(extref.attrib)

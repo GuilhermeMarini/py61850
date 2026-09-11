@@ -128,6 +128,18 @@ class SetAttributes:
     mapping's order. Without it the inverse of a deletion would re-add the
     attribute at the end, and a document that had been edited and fully undone
     would no longer be the file it came from.
+
+    **The inverse of such an edit describes the element as it was**, in the
+    element's own order -- which is what makes the rule survive being applied
+    twice. An edit that names every attribute and changes only their values
+    still rebuilds them in the mapping's order, so an inverse that carried
+    the mapping's order instead would undo into it.
+
+    **The root element is the one place the order rule cannot reach.** The
+    writer puts the root's attributes back into the order the FILE wrote
+    them, because it is the one element `ElementTree` reorders -- see
+    `SclDocument.to_bytes`. Values and the key set reach the file; a
+    reordering of them does not.
     """
 
     __slots__ = ("element", "attributes")
@@ -151,8 +163,12 @@ class SetTextContent:
     and whose setter deletes the children. Child elements are untouched here,
     which is what makes the primitive invertible at all.
 
-    ``None`` is a real value and not the same as ``""``: an element with no
-    text serialises ``<X />``, one with empty text serialises ``<X></X>``.
+    ``None`` is a real value and not the same as ``""``, and both survive an
+    edit and its inverse. **The difference is in the tree and not in the
+    file**: `ElementTree`'s serialiser tests the text for truth rather than
+    for ``None``, so an element with either spelling comes out ``<X />``, with
+    children or without. A consumer that reads ``.text`` can tell them apart;
+    a consumer that reads the bytes cannot.
     """
 
     __slots__ = ("element", "text")
@@ -423,17 +439,27 @@ def _set_attributes(doc, edit: SetAttributes) -> Edit:
     adds = [k for k, v in wanted.items() if v is not None and k not in attrib]
     drops = [k for k, v in wanted.items() if v is None and k in attrib]
 
-    if adds or drops:
-        # The key set changes, so the inverse has to restore ORDER as well as
-        # values -- and the only thing that can is a complete description of
-        # what was there. See `SetAttributes`.
+    complete = all(name in wanted for name in attrib)
+
+    if adds or drops or complete:
+        # The inverse has to restore ORDER as well as values -- and the only
+        # thing that can is a complete description of what was there, read
+        # off the ELEMENT rather than off the edit. See `SetAttributes`.
+        #
+        # `complete` belongs in that condition and not only `adds or drops`.
+        # An edit that names every attribute and changes nothing but their
+        # values leaves the key set alone, but it is still rebuilt in the
+        # mapping's order below -- so an inverse built by walking `wanted`
+        # would carry the EDIT's order and undo into it. Values right, file
+        # different, which is the failure Q13 exists for, one layer down.
+        # The invertibility property test found it on five seeds out of five.
         previous: Dict[str, Optional[str]] = dict(attrib)
         for name in adds:
             previous[name] = None
     else:
         previous = {name: attrib.get(name) for name in wanted}
 
-    if all(name in wanted for name in attrib):
+    if complete:
         # A complete description: rebuilt in the mapping's order.
         rebuilt = {k: v for k, v in wanted.items() if v is not None}
         attrib.clear()
