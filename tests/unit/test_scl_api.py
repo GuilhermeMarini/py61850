@@ -36,6 +36,8 @@ class TestSurface(unittest.TestCase):
             "LogicalNode", "DataObject", "DataAttribute",
             "DataSet", "FCDA", "ControlBlock", "SettingControl", "ExtRef",
             "strip_ns", "iter_local", "children_local", "privates_of",
+            "Insert", "Remove", "SetAttributes", "SetTextContent",
+            "EditRejected",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
