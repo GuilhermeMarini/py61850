@@ -7,13 +7,19 @@
 # available from the copyright holder -- see COMMERCIAL.md.
 """A document parsed and written back out with no edit is the file it came from.
 
-This is the specification for the whole write side of the library, written
-before the write side exists. Every case here states one thing that must
-survive a zero-edit round trip; the ones that do not survive today are marked
-`expectedFailure` and listed in `KNOWN_GAPS` with the reason and the work that
-closes them. **Closing one turns its case into an unexpected success, which
-`unittest` reports as a failure** -- so the table below cannot rot: the suite
-goes red the moment reality moves past it, in either direction.
+This is the specification for the whole write side of the library. It was
+written before the write side existed, with every case that did not yet pass
+marked `expectedFailure` and listed in a `KNOWN_GAPS` table; **that table is
+gone, because the gaps are**. All four fixtures now round-trip byte for byte
+under the five cosmetic exceptions `roundtrip` erases, and nothing here is
+expected to fail.
+
+The mechanism that removed the table is worth keeping in mind for the edit
+layer, which will need it again: `unittest` reports a passing
+`expectedFailure` as an UNEXPECTED SUCCESS, and an unexpected success fails
+the run. A list of known gaps written that way cannot rot -- the suite goes
+red the moment reality moves past it, in either direction, and the way to
+close a gap is to delete its entry and watch the run go green.
 
 ## Why this test is worth more than the library's other 336
 
@@ -31,74 +37,47 @@ records what was anonymised out of them and what deliberately was not.
 
 ## What counts as a difference
 
-Four cosmetic exceptions are permitted and no more -- attribute quote style,
-empty-element spacing, CDATA boundaries and the spelling of a numeric
-character reference. `roundtrip.normalise` erases exactly those, counts what
-it erased, and touches nothing else. Everything else is a gap, including
-three that were taken in scope deliberately and that the writer closes:
-**line endings**, the **XML declaration**, and the **order of the root's
-attributes**.
+Five cosmetic exceptions are permitted and no more -- attribute quote style,
+empty-element spacing, empty-element form, CDATA boundaries and the spelling
+of a numeric character reference. `roundtrip.normalise` erases exactly those,
+counts what it erased, and touches nothing else. Every one of them is a place
+where `ElementTree` gives no say; none is observable through an XML parser.
 
-Line endings are the one worth stating a reason for. All three vendor
-fixtures are CRLF files; XML end-of-line normalisation is mandatory and
-happens inside the parser, so `\\r\\n` is gone before a tree exists and no
-amount of parser hardening can bring it back. Calling that cosmetic would
-mean every save hands DIGSI a diff on all 660,549 lines of `sel.scd` -- which
-is exactly the outcome the fidelity guarantee exists to prevent -- and it
-would quietly rewrite the SEL settings text embedded in that file's CDATA
-sections, whose own CRLF breaks are part of the payload. So the writer will
-record the line ending it read and re-emit it, and until it does, this fails.
+**Three differences were taken in scope deliberately rather than added to
+that list**, and the writer closes all three:
 
-The root's attribute order is the third, and it is the one that shows up
-nowhere except in `test_bytes`. `ElementTree` writes the namespace
-declarations it GENERATES first, sorted by prefix, ahead of every ordinary
-attribute; the unused ones this library re-emits as literal attributes land
-after them all. Real roots interleave the two -- `sel.scd` opens
-`<SCL xmlns:esel=... version=...>` and `siemens.scd` opens
-`<SCL version=... xmlns=...>` -- so every fixture's line 2 differs even now
-that all four have every declaration, under its own prefix. Nothing but the
-root element is affected: `ElementTree` preserves attribute order everywhere
-that it is not also emitting a declaration.
+**Line endings.** All three vendor fixtures are CRLF files; XML end-of-line
+normalisation is mandatory and happens inside the parser, so `\r\n` is gone
+before a tree exists and no amount of parser hardening brings it back.
+Calling that cosmetic would mean every save hands DIGSI a diff on all 660,549
+lines of `sel.scd` -- exactly the outcome the fidelity guarantee exists to
+prevent -- and it would quietly rewrite the SEL settings text embedded in
+that file's CDATA sections, whose own CRLF breaks are part of the payload. So
+`_SourceLayout` records the ending the file was read with and
+`SclDocument.to_bytes` re-emits it, over the whole document and last.
+
+**The XML declaration.** `ElementTree` writes
+`<?xml version='1.0' encoding='utf-8'?>` and every fixture here writes double
+quotes, three of them with `UTF-8` capitalised. The writer keeps the file's
+own spelling instead of the serialiser's, by writing the declaration itself.
+
+**The root's attribute order**, the one that shows up nowhere except in
+`test_bytes`. `ElementTree` writes the namespace declarations it GENERATES
+first, sorted by prefix, ahead of every ordinary attribute; the unused ones
+this library re-emits as literal attributes land after them all. Real roots
+interleave the two -- `sel.scd` opens `<SCL xmlns:esel=... version=...
+xmlns=...>` with the default declaration LAST, and `siemens.scd` opens
+`<SCL version=... xmlns=...>` -- so every fixture's line 2 differed even once
+all four had every declaration under its own prefix. The writer records the
+order and reorders that one tag after serialising. Nothing but the root is
+affected: `ElementTree` preserves attribute order everywhere it is not also
+emitting a declaration.
 """
 
-import functools
 import sys
 import unittest
 
 from . import roundtrip
-
-# Which case fails today, for which fixture, and what closes it. Every entry
-# is measured, not guessed. An entry that is wrong in either direction breaks
-# the suite: a gap that is not listed fails, and a listed gap that has been
-# closed is an unexpected success.
-KNOWN_GAPS = {
-    "sel.scd": {
-        "line_endings": "660,549 CRLF lines written back as LF (the writer)",
-        "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the two above, and both root declarations hoisted ahead of "
-                 "version= (the writer)",
-    },
-    "mixed.scd": {
-        "line_endings": "379,313 CRLF lines written back as LF (the writer)",
-        "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the two above, and the root's seven declarations split -- five "
-                 "hoisted ahead of version=, two re-emitted after every attribute "
-                 "(the writer)",
-    },
-    "siemens.scd": {
-        "line_endings": "216,700 CRLF lines written back as LF (the writer)",
-        "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the two above, and the root's six declarations split -- four "
-                 "hoisted ahead of version=, two re-emitted after every attribute "
-                 "(the writer)",
-    },
-    "namespaces.scd": {
-        "line_endings": "the trailing newline after </SCL> is not written (the writer)",
-        "xml_declaration": "quote style and the case of the encoding name (the writer)",
-        "bytes": "the two above, and xmlns:sel re-emitted after release= instead "
-                 "of before version= (the writer)",
-    },
-}
 
 _reports = {}
 
@@ -189,7 +168,7 @@ class RoundTrip:
         self.assertEqual(self.report.before.declaration, self.report.after.declaration)
 
     def test_bytes(self):
-        """The whole file, once the four permitted exceptions are applied."""
+        """The whole file, once the five permitted exceptions are applied."""
         if self.report.equal:
             return
         offset, left, right = self.report.first_difference
@@ -215,32 +194,6 @@ class SiemensScdRoundTrip(RoundTrip, unittest.TestCase):
 class NamespacesScdRoundTrip(RoundTrip, unittest.TestCase):
     """Hand-written: `xmlns:sel` declared and unused, `sxy:` coordinates used."""
     FIXTURE = "namespaces.scd"
-
-
-def _expect_failure(case, name):
-    """Mark one case's method as a known gap, without marking the other three.
-
-    `unittest.expectedFailure` sets a flag ON THE FUNCTION IT IS GIVEN and
-    returns that same object -- it wraps nothing. The four fixture classes
-    inherit one function per case from `RoundTrip`, so marking `test_comments`
-    for `sel.scd` would mark it for every fixture, and the three files whose
-    comments do survive would report an unexpected success. Each class gets
-    its own object to carry the flag.
-    """
-    inherited = getattr(case, name)
-
-    @functools.wraps(inherited)
-    def marked(self):
-        return inherited(self)
-
-    setattr(case, name, unittest.expectedFailure(marked))
-
-
-for _case in (SelScdRoundTrip, MixedScdRoundTrip, SiemensScdRoundTrip,
-              NamespacesScdRoundTrip):
-    for _name in KNOWN_GAPS[_case.FIXTURE]:
-        _expect_failure(_case, "test_" + _name)
-del _case, _name
 
 
 if __name__ == "__main__":

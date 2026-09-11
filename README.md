@@ -108,7 +108,7 @@ with FileTransfer("192.0.2.22") as ft:
                      progress=lambda got, total: print(f"{got}/{total}"))
 ```
 
-### Reading an SCL file
+### Reading an SCL file — and writing it back unchanged
 
 ```python
 from py61850.scl import SclDocument
@@ -125,6 +125,27 @@ for ln in ied.logical_nodes():
     for attr in ln.walk():
         print(attr.reference(), attr.mms_item(), attr.fc, attr.btype)
 ```
+
+A parsed document goes back out as the file it came from:
+
+```python
+doc.write("station.scd")          # atomic: temp file beside it, then os.replace
+raw = doc.to_bytes()              # or the bytes, to hand somewhere else
+```
+
+**Byte for byte**, with no edit applied — comments, indentation, attribute
+order, namespace prefixes, `xmlns` declarations nothing uses, the line ending
+the file was written with and the XML declaration as it was spelled all
+survive. Five differences are permitted, none of them observable through an
+XML parser and every one a limit of the standard library's serialiser:
+attribute quote style, empty-element spacing and form, CDATA boundaries, and
+the spelling of a numeric character reference. `SclDocument.to_bytes` states
+all five; the round-trip test holds them against 44 MB of real station
+exports from three vendors.
+
+That guarantee is the point of the write side. The file goes back into DIGSI
+and SEL Architect, and a library that reformats the 99 % of an SCD it did not
+touch turns every save into a whole-file diff.
 
 `py61850.scl` is imported explicitly and is never pulled in by `import
 py61850`, so the MMS client keeps installing and running unprivileged.

@@ -16,6 +16,18 @@
             for attr in ln.walk():
                 print(attr.reference(), attr.mms_item(), attr.btype)
 
+    doc.write("station.scd")        # atomically, and byte for byte
+
+**Reading is not the whole of it: a document written back out is the file it
+came from.** ``SclDocument.to_bytes`` and ``SclDocument.write`` hold a
+fidelity guarantee -- comments, indentation, attribute order, namespace
+prefixes, declarations nothing uses, the line ending and the XML declaration
+all survive a parse and a serialise, with five exceptions no XML parser can
+observe. :meth:`SclDocument.to_bytes` names all five. It matters because the
+file goes back to DIGSI and to SEL Architect: a library that reformats the
+99 % of a station export it did not touch turns every save into a whole-file
+diff.
+
 **What this package is for.** It is a general IEC 61850-6 implementation,
 judged against what any SCL tool would need -- IEDScout, IEC Browser, OpenSCD
 -- not against what one consumer happens to extract today. If a vendor-neutral

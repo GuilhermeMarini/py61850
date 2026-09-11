@@ -17,7 +17,7 @@ comparison below answers a specific question, and the byte compare is the last
 of them rather than the only one.
 
 **It reads bytes, not the model.** Nothing here calls `iter_local`,
-`_declared_namespaces` or any other reader in the library -- a harness that
+`_source_layout` or any other reader in the library -- a harness that
 asks the library under test what is in the file cannot catch the library
 losing it. The namespace declarations, the comments and the prefixes are all
 recovered from the raw bytes with a scanner that owes the library nothing.
@@ -26,7 +26,9 @@ the price of it being independent, and it is worth paying here.
 
 ## The permitted cosmetic differences
 
-Four, and no more. Everything else is a failure.
+Five, and no more. Everything else is a failure. Every one of them is a place
+where `ElementTree` cannot be told what to do rather than a place where this
+library chose not to bother, and none is observable through an XML parser.
 
 1. **Attribute quote style** -- `a='1'` and `a="1"` are the same attribute.
    `ElementTree` always writes double quotes; a vendor may write either.
@@ -39,13 +41,24 @@ Four, and no more. Everything else is a failure.
 4. **Numeric character references** -- `&#xA;` and `&#10;` are the same
    character. `ElementTree`'s attribute escaper writes the decimal form and
    the spelling is not configurable.
+5. **Empty-element form** -- `<X></X>` and `<X/>` are the same element. Expat
+   reports no character data for either, so both reach the tree as one
+   element with `text` of `None` and nothing downstream can tell them apart;
+   recovering the difference would mean tracking expat's byte offset through
+   every one of the 700,000 elements in `sel.scd` to serve 72 of them.
+   **The file is not consistent about it either** -- that same export writes
+   115,576 empty elements as `<X />` and 72 as `<X></X>`, some of them lines
+   apart, all of them a `<Val>` inside a `<DAI name="setVal">` or
+   `<DAI name="setSrcRef">` left blank. There is no house style here to
+   violate. This is the case A1's *watch for* reserved: a fixture that is
+   already non-canonical, decided per fixture with the reason written down.
 
-:func:`normalise` erases exactly those four and counts each substitution it
+:func:`normalise` erases exactly those five and counts each substitution it
 makes, so the report can say how much of the compare was bought by an
 exception rather than earned. **It normalises nothing else.** In particular
 it does not touch line endings: those are in scope for the fidelity
-guarantee, not a cosmetic difference, and the byte compare is meant to fail
-on them until the writer re-emits them.
+guarantee, not a cosmetic difference, and the byte compare fails on them if
+the writer ever stops re-emitting the ending it read.
 
 The one place line endings ARE normalised is inside
 :attr:`Report.lost_comments`, which matches comment text across the two
@@ -70,7 +83,7 @@ CORPUS = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "scl"
 _REGION = re.compile(rb"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<[^>]*>", re.S)
 
 # `xmlns="uri"` and `xmlns:pfx="uri"`, with the prefix CAPTURED. The library's
-# own `_declared_namespaces()` now recovers the same pair, by a regex that
+# own `_source_layout()` now recovers the same pair, by a regex that
 # looks much like this one -- and this one stays, deliberately. A harness that
 # imported the library's scanner would agree with the library about what the
 # file declares even when both were wrong, which is the one failure a
@@ -87,6 +100,14 @@ _SQ_ATTR = re.compile(rb"""([A-Za-z_:][\w:.\-]*)\s*=\s*'([^'"]*)'""")
 _TRAILING_SPACE_EMPTY = re.compile(rb"\s+/>$")
 
 _HEX_REF = re.compile(rb"&#[xX]([0-9A-Fa-f]+);")
+
+# `<X a="1"></X>`, with the name and its attributes captured so the pair can
+# be rewritten as `<X a="1"/>`. Applied after the loop above has already
+# turned every `<X />` into `<X/>`, so the two forms land on one spelling.
+# `[^<>]*` for the attributes carries the same limitation `_REGION` does -- a
+# raw `>` inside an attribute value stops it -- and the same answer: a miss
+# leaves a difference the report names rather than one it hides.
+_LONG_EMPTY = re.compile(rb"<([A-Za-z_][-A-Za-z0-9_.:]*)([^<>]*)></\1\s*>")
 
 # XML's own end-of-line normalisation: `\r\n` and a lone `\r` both become
 # `\n`. See `_eol_normalised`.
@@ -109,7 +130,7 @@ def _eol_normalised(text):
 
     **Nothing is forgiven by normalising here.** The CRLF is still counted
     twice, by the `line_endings` case and by the byte compare, and neither
-    passes until the writer re-emits the ending it read. This only stops the
+    passes unless the writer re-emits the ending it read. This only stops the
     `comments` case from answering a question that is not its own, so it can
     answer the one that is: is every comment still in the file.
     """
@@ -126,13 +147,14 @@ def _escape_text(data):
 
 
 def normalise(data):
-    """``(bytes, counts)`` with the four permitted cosmetic differences erased.
+    """``(bytes, counts)`` with the five permitted cosmetic differences erased.
 
     ``counts`` names how many substitutions each exception bought, so a report
-    can distinguish "identical" from "identical once four exceptions were
-    applied 660 times".
+    can distinguish "identical" from "identical once five exceptions were
+    applied 231,326 times" -- which is what `sel.scd` actually costs.
     """
-    counts = {"attr_quotes": 0, "empty_spacing": 0, "cdata_flattened": 0, "hex_refs": 0}
+    counts = {"attr_quotes": 0, "empty_spacing": 0, "cdata_flattened": 0,
+              "hex_refs": 0, "empty_long_form": 0}
     out = []
     pos = 0
     for match in _REGION.finditer(data):
@@ -151,10 +173,13 @@ def normalise(data):
         pos = match.end()
     out.append(data[pos:])
     joined = b"".join(out)
-    # Document-wide, and last: a character reference lives in element content
-    # as readily as in an attribute value, and content is not a region above.
+    # Document-wide, and last, both of them: a character reference lives in
+    # element content as readily as in an attribute value, and an empty
+    # element written long-form spans TWO of the regions above with nothing
+    # between them, so neither can be done inside the loop.
     joined, counts["hex_refs"] = _HEX_REF.subn(
         lambda m: b"&#%d;" % int(m.group(1), 16), joined)
+    joined, counts["empty_long_form"] = _LONG_EMPTY.subn(rb"<\1\2/>", joined)
     return joined, counts
 
 
@@ -292,7 +317,7 @@ def round_trip(name):
     """
     path = CORPUS / name
     original = path.read_bytes()
-    return original, SclDocument.parse(path)._to_bytes()
+    return original, SclDocument.parse(path).to_bytes()
 
 
 def _describe(count, singular, plural=None):
