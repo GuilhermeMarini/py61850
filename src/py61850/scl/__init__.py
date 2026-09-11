@@ -95,6 +95,11 @@ from .edit import (
     SetAttributes,
     SetTextContent,
 )
+from .ordering import (
+    content_model,
+    may_contain,
+    reference_for,
+)
 from .model import (
     AccessPoint,
     DataAttribute,
@@ -118,4 +123,5 @@ __all__ = [
     "DataSet", "FCDA", "ControlBlock", "SettingControl", "ExtRef",
     "strip_ns", "iter_local", "children_local", "privates_of",
     "Insert", "Remove", "SetAttributes", "SetTextContent", "EditRejected",
+    "reference_for", "may_contain", "content_model",
 ]

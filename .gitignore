@@ -43,3 +43,16 @@ fixtures/ICD/
 # The substitution mapping names what was substituted -- the substation, the
 # utility, the engineers' accounts. Tracking it would undo the anonymisation.
 tools/*.local.json
+
+# IEC reference material -- the schema and namespace packages themselves.
+#
+# `docs/IEC61850 files/` holds IEC's own code-component distributions: the SCL
+# XSD sets (2003, 2007B, 2007B4, 2007C5), the 7-2/7-3/7-4 NSD packages and
+# IEC's note on handling code components. They are IEC copyright, the terms
+# are at www.iec.ch/CCv1, and this repository is public and ships to PyPI.
+#
+# Excluded as a directory rather than by extension, because the useful ones
+# arrive as .zip and a future .xsd dropped beside them must not be committed
+# either. What may be DERIVED from them and shipped -- the content-model
+# ordering table -- is a separate question, recorded as Q17 in the plan.
+docs/IEC61850 files/
