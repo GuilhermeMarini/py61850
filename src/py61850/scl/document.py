@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
+from . import edit as _edit
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_file
 
 _logger = logging.getLogger(__name__)
@@ -332,6 +333,41 @@ class SclDocument:
             # what says so the day a fixture disagrees.
             data = data.replace(b"\n", self._layout.eol)
         return data
+
+    # -- editing ------------------------------------------------------------
+
+    def apply_edit(self, edit):
+        """Apply ``edit`` and return the edit that undoes it.
+
+        ``edit`` is an :class:`~py61850.scl.Insert`,
+        :class:`~py61850.scl.Remove`, :class:`~py61850.scl.SetAttributes` or
+        :class:`~py61850.scl.SetTextContent`, or a list of them -- which is
+        itself an edit, applied in order and inverted in reverse.
+
+        Raises :class:`~py61850.scl.EditRejected`, having changed nothing. See
+        :mod:`py61850.scl.edit` for what that costs and what it guarantees.
+
+        **The lazy caches are not invalidated.** ``.templates``,
+        ``.communication``, ``.ied_headers`` and each ``ied(name)`` are built
+        on first use and kept; an edit that removes an IED leaves the cached
+        one reachable. Rebuilding them all costs about 1 ms, but re-warming a
+        single ``Ied`` costs 41 ms against 3 ms warm, on a 22 MB export -- a
+        14x tax on exactly the loop an editor runs. What to do about it is a
+        recorded open question, to be answered where the model objects are
+        actually edited; for now, an edited document is best read through a
+        fresh :meth:`parse` or through the tree itself.
+        """
+        return _edit.apply_edit(self, edit)
+
+    def parent_of(self, element):
+        """``element``'s parent, or ``None`` for the root and for an element
+        this document does not contain.
+
+        The parent map ``ElementTree`` does not provide. It is built on first
+        use -- 98 ms and 21 MB on a 22 MB export -- and maintained by
+        :meth:`apply_edit` thereafter.
+        """
+        return _edit.parent_of(self, element)
 
     def write(self, path) -> None:
         """Write the document to ``path``, atomically.

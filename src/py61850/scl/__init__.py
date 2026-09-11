@@ -18,6 +18,9 @@
 
     doc.write("station.scd")        # atomically, and byte for byte
 
+    undo = doc.apply_edit(SetAttributes(el, {"desc": "52a"}))
+    doc.apply_edit(undo)           # and it is the file it was again
+
 **Reading is not the whole of it: a document written back out is the file it
 came from.** ``SclDocument.to_bytes`` and ``SclDocument.write`` hold a
 fidelity guarantee -- comments, indentation, attribute order, namespace
@@ -85,6 +88,13 @@ from .document import (
     privates_of,
     strip_ns,
 )
+from .edit import (
+    EditRejected,
+    Insert,
+    Remove,
+    SetAttributes,
+    SetTextContent,
+)
 from .model import (
     AccessPoint,
     DataAttribute,
@@ -107,4 +117,5 @@ __all__ = [
     "DataObject", "DataAttribute",
     "DataSet", "FCDA", "ControlBlock", "SettingControl", "ExtRef",
     "strip_ns", "iter_local", "children_local", "privates_of",
+    "Insert", "Remove", "SetAttributes", "SetTextContent", "EditRejected",
 ]
