@@ -359,10 +359,27 @@ class TestUpdateDatSet(_Base):
         self.assertEqual([d.get("name") for d in _tags(doc, "DataSet")],
                          ["RENAMED", "DS2"])
 
-    def test_the_revision_moves_with_it(self):
+    def test_a_rename_does_not_move_the_revision(self):
+        """The data the subscriber cached is unchanged -- the same members in
+        the same order, under another name -- so there is nothing for a
+        `confRev` to warn about. A10 took the same view from the DataSet side
+        and this side was corrected to agree; see Q19's neighbour in the
+        module docstring."""
         doc = self.doc()
         doc.apply_edit(self.edits(doc, "GCB1", {"datSet": "RENAMED"}))
-        self.assertEqual(_named(doc, "GSEControl", "GCB1").get("confRev"), "10001")
+        self.assertEqual(_named(doc, "GSEControl", "GCB1").get("confRev"), "1")
+
+    def test_a_genuine_re_pointing_does_move_the_revision(self):
+        """A block whose dataset is SHARED cannot be renamed into, so setting
+        `datSet` re-points it at different data -- and that is what a
+        subscriber has to be told about."""
+        doc = self.doc(station(ln0_body=(
+            fx.dataset("SHARED", MEMBERS)
+            + fx.gse_control("GCB1", "SHARED")
+            + fx.report_control("RCB1", "SHARED"))))
+        doc.apply_edit(self.edits(doc, "GCB1", {"datSet": "OTHER"}))
+        self.assertEqual(_named(doc, "GSEControl", "GCB1").get("confRev"),
+                         str(1 + CONF_REV_STEP))
 
     def test_a_shared_dataset_is_not_renamed(self):
         """No dataset in the reference corpus is shared, so this branch is
@@ -426,9 +443,15 @@ class TestUpdateDatSet(_Base):
 
     def test_a_caller_that_names_the_revision_keeps_it(self):
         """The reference's `create*Control` says the same in its own words: a
-        user-supplied `confRev` overwrites the logic that would set it."""
-        doc = self.doc()
-        edits = self.edits(doc, "GCB1", {"datSet": "RENAMED", "confRev": "7"})
+        user-supplied `confRev` overwrites the logic that would set it. Asked
+        on the re-pointing path, which is the one that would otherwise move
+        it."""
+        doc = self.doc(station(ln0_body=(
+            fx.dataset("SHARED", MEMBERS)
+            + fx.gse_control("GCB1", "SHARED")
+            + fx.report_control("RCB1", "SHARED"))))
+        edits = self.edits(doc, "GCB1", {"datSet": "OTHER", "confRev": "7"})
+        self.assertEqual(len(edits), 1)
         doc.apply_edit(edits)
         self.assertEqual(_named(doc, "GSEControl", "GCB1").get("confRev"), "7")
 
@@ -438,7 +461,9 @@ class TestUpdateDatSet(_Base):
         edit = SetAttributes(block, {"datSet": "RENAMED"})
         edits = update_dat_set(doc, edit)
         self.assertIs(edits[0], edit)
-        self.assertEqual(len(edits), 3)
+        # The caller's edit and the rename. No `confRev`: the published data
+        # is the same data under a new name.
+        self.assertEqual(len(edits), 2)
 
     def test_it_is_one_history_entry(self):
         doc = self.doc()
