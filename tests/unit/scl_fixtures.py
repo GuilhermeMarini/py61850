@@ -205,19 +205,49 @@ def dataset(name, fcdas=(), desc=""):
             + "</DataSet>")
 
 
-def gse_control(name, dat_set, app_id="", conf_rev="1", body=""):
-    return (f'<GSEControl name="{name}" datSet="{dat_set}" appID="{app_id}" '
+def _dat_set(dat_set):
+    """` datSet="X"`, or nothing at all when `dat_set` is None.
+
+    **Omitting it is not a degenerate case.** 720 of the reference corpus's
+    1,015 control blocks -- the majority of every report control block in it
+    -- carry no `datSet`: they are unconfigured RCB templates a vendor ships
+    in the ICD, and they are what a capability meets most often.
+    """
+    return "" if dat_set is None else f' datSet="{dat_set}"'
+
+
+def gse_control(name, dat_set=None, app_id="", conf_rev="1", body=""):
+    return (f'<GSEControl name="{name}"{_dat_set(dat_set)} appID="{app_id}" '
             f'confRev="{conf_rev}" type="GOOSE">{body}</GSEControl>')
 
 
-def report_control(name, dat_set, conf_rev="1", body=""):
-    return (f'<ReportControl name="{name}" datSet="{dat_set}" '
-            f'confRev="{conf_rev}">{body}</ReportControl>')
+def report_control(name, dat_set=None, conf_rev="1", body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return (f'<ReportControl name="{name}"{_dat_set(dat_set)} '
+            f'confRev="{conf_rev}"{extra}>{body}</ReportControl>')
 
 
-def smv_control(name, dat_set, app_id="4000"):
-    return (f'<SampledValueControl name="{name}" datSet="{dat_set}" '
-            f'smvID="{name}" appID="{app_id}"/>')
+def smv_control(name, dat_set=None, app_id="4000", conf_rev="1", body=""):
+    return (f'<SampledValueControl name="{name}"{_dat_set(dat_set)} '
+            f'smvID="{name}" appID="{app_id}" '
+            f'confRev="{conf_rev}">{body}</SampledValueControl>')
+
+
+def log_control(name, dat_set=None, conf_rev="1", ln_class="LLN0", body=""):
+    """A `<LogControl>`. No corpus file carries one -- the fixtures are the
+    only test material there is, which is why the capabilities that accept it
+    are the ones where `datSet` alone decides the behaviour."""
+    return (f'<LogControl name="{name}"{_dat_set(dat_set)} '
+            f'confRev="{conf_rev}" logName="{name}" '
+            f'lnClass="{ln_class}">{body}</LogControl>')
+
+
+def ied_name(text, ap_ref=None):
+    """An `<IEDName>`: the Edition 1 way of recording a subscriber, written as
+    a CHILD of the control block. 345 of them are in the reference corpus, all
+    carrying `apRef` and the subscribing IED's name as text."""
+    attrs = "" if ap_ref is None else f' apRef="{ap_ref}"'
+    return f"<IEDName{attrs}>{text}</IEDName>"
 
 
 def setting_control(num_of_sgs="6", act_sg="1"):

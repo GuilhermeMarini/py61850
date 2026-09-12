@@ -22,8 +22,13 @@ from .document import children_local, privates_of
 #: The control-block elements this module reads, by their SCL element name.
 #: ``SettingControl`` is deliberately absent -- it has no name and there is at
 #: most one per LN0, so it does not belong in a mapping keyed by name.
-_CONTROL_BLOCK_TAGS = ("ReportControl", "GSEControl", "SampledValueControl",
-                       "LogControl")
+#:
+#: Public because :mod:`py61850.scl.control_block` decides what a `DataSet` is
+#: used BY from the same list, and a second copy of it there is how the read
+#: model and the edit layer would come to disagree about whether a `LogControl`
+#: is a control block.
+CONTROL_BLOCK_TAGS = ("ReportControl", "GSEControl", "SampledValueControl",
+                      "LogControl")
 
 
 class FCDA:
@@ -221,7 +226,7 @@ def data_sets_of(node) -> dict:
 
 def control_blocks_of(node) -> dict:
     out = {}
-    for kind in _CONTROL_BLOCK_TAGS:
+    for kind in CONTROL_BLOCK_TAGS:
         for el in children_local(node.element, kind):
             cb = ControlBlock(kind, el, node)
             if cb.name:
