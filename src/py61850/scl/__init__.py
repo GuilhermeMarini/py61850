@@ -82,7 +82,25 @@ from .communication import (
     ControlBlockAddress,
     SubNetwork,
 )
-from .controls import ControlBlock, DataSet, ExtRef, FCDA, SettingControl
+from .control_block import (
+    CONF_REV_STEP,
+    control_block_gse_or_smv,
+    control_block_obj_ref,
+    control_blocks,
+    find_control_block_subscription,
+    path_id,
+    remove_control_block,
+    update_dat_set,
+    updated_conf_rev,
+)
+from .controls import (
+    CONTROL_BLOCK_TAGS,
+    ControlBlock,
+    DataSet,
+    ExtRef,
+    FCDA,
+    SettingControl,
+)
 from .document import (
     Header,
     SclDocument,
@@ -137,6 +155,7 @@ __all__ = [
     "IedHeader", "Ied", "AccessPoint", "Server", "LDevice", "LogicalNode",
     "DataObject", "DataAttribute",
     "DataSet", "FCDA", "ControlBlock", "SettingControl", "ExtRef",
+    "CONTROL_BLOCK_TAGS",
     "strip_ns", "iter_local", "children_local", "privates_of",
     "Insert", "Remove", "SetAttributes", "SetTextContent", "EditRejected",
     "reference_for", "may_contain", "content_model",
@@ -144,4 +163,7 @@ __all__ = [
     "is_subscribed", "fcda_meets_ext_ref_restrictions",
     "ext_ref_type_restrictions", "fcda_type",
     "match_data_attributes", "match_src_attributes", "source_control_block",
+    "control_blocks", "find_control_block_subscription", "control_block_obj_ref",
+    "path_id", "control_block_gse_or_smv", "updated_conf_rev", "CONF_REV_STEP",
+    "update_dat_set", "remove_control_block",
 ]

@@ -35,6 +35,7 @@ class TestSurface(unittest.TestCase):
             "IedHeader", "Ied", "AccessPoint", "Server", "LDevice",
             "LogicalNode", "DataObject", "DataAttribute",
             "DataSet", "FCDA", "ControlBlock", "SettingControl", "ExtRef",
+            "CONTROL_BLOCK_TAGS",
             "strip_ns", "iter_local", "children_local", "privates_of",
             "Insert", "Remove", "SetAttributes", "SetTextContent",
             "EditRejected",
@@ -44,6 +45,10 @@ class TestSurface(unittest.TestCase):
             "ext_ref_type_restrictions", "fcda_type",
             "match_data_attributes", "match_src_attributes",
             "source_control_block",
+            "control_blocks", "find_control_block_subscription",
+            "control_block_obj_ref", "path_id", "control_block_gse_or_smv",
+            "updated_conf_rev", "CONF_REV_STEP",
+            "update_dat_set", "remove_control_block",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
