@@ -93,6 +93,18 @@ from .control_block import (
     update_dat_set,
     updated_conf_rev,
 )
+from .data_set import (
+    MaxAttributes,
+    can_add_data_set,
+    can_add_fcda,
+    create_data_set,
+    fcda_subscriptions,
+    max_attributes,
+    remove_data_set,
+    remove_fcda,
+    update_data_set,
+    updated_conf_rev_edits,
+)
 from .controls import (
     CONTROL_BLOCK_TAGS,
     ControlBlock,
@@ -113,6 +125,7 @@ from .extref import (
     Connection,
     TypeRestriction,
     ext_ref_type_restrictions,
+    fcda_covers_ext_ref,
     fcda_meets_ext_ref_restrictions,
     fcda_type,
     is_subscribed,
@@ -163,7 +176,11 @@ __all__ = [
     "is_subscribed", "fcda_meets_ext_ref_restrictions",
     "ext_ref_type_restrictions", "fcda_type",
     "match_data_attributes", "match_src_attributes", "source_control_block",
+    "fcda_covers_ext_ref",
     "control_blocks", "find_control_block_subscription", "control_block_obj_ref",
     "path_id", "control_block_gse_or_smv", "updated_conf_rev", "CONF_REV_STEP",
     "update_dat_set", "remove_control_block",
+    "can_add_data_set", "create_data_set", "update_data_set", "remove_data_set",
+    "can_add_fcda", "max_attributes", "MaxAttributes", "fcda_subscriptions",
+    "remove_fcda", "updated_conf_rev_edits",
 ]

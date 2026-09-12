@@ -52,9 +52,13 @@ PUBLISHED DATA changes -- the `datSet` reference changes, or the referenced
 `desc` or a `bufTime`.
 
 **A9 owns exactly one of those triggers**: the `datSet` change, in
-:func:`update_dat_set`. The DataSet-side triggers belong with `tDataSet` and
-`tFCDA`, where the member edits are, and :func:`updated_conf_rev` is the
-shared rule they call.
+:func:`update_dat_set`, and only where it re-points the block at different
+data. Where it RENAMES the block's exclusive dataset instead, the published
+data is unchanged and the revision does not move -- A10 decided that from the
+DataSet side and this side was corrected to agree. The rest of the DataSet
+triggers belong with `tDataSet` and `tFCDA`, where the member edits are;
+:func:`updated_conf_rev` is the shared rule and
+:func:`~py61850.scl.updated_conf_rev_edits` its fan-out.
 
 **The step is 10,000, and the reference corpus is what says so.** It looks
 arbitrary until the files are counted: of 1,015 control blocks across three
@@ -475,8 +479,15 @@ def update_dat_set(doc, edit) -> List:
     The way to re-point such a block is to edit the `DataSet` first, or to
     build the `SetAttributes` and apply it without this check.
 
-    `confRev` moves, because the published data changed, unless the caller's
-    own mapping names `confRev` -- then the revision is the caller's.
+    **`confRev` moves only when the block is genuinely re-pointed.** Setting
+    `datSet` on a block whose dataset is exclusive RENAMES that dataset, and
+    the data the subscriber cached is then exactly what it was -- the same
+    members in the same order, under another name. So the rename branch leaves
+    the revision alone, and every other path moves it, unless the caller's own
+    mapping names `confRev` and has decided it. A10 took the same view from
+    the DataSet side, where :func:`~py61850.scl.update_data_set` re-points the
+    publishers of a renamed dataset and moves nothing; this was corrected to
+    agree with it rather than the two sides of one event disagreeing.
 
     Returns ``[edit, rename?, confRev?]``, in that order.
 
@@ -499,6 +510,7 @@ def update_dat_set(doc, edit) -> List:
         return [edit]
 
     edits: List = [edit]
+    renamed = False
     data_set = _data_set_of(doc, control)
     if data_set is not None and wanted and _is_exclusive(doc, data_set, control):
         node = doc.parent_of(data_set)
@@ -511,8 +523,9 @@ def update_dat_set(doc, edit) -> List:
                 f"would collide with the DataSet already named {wanted!r} in "
                 f"the same logical node")
         edits.append(SetAttributes(data_set, {"name": wanted}))
+        renamed = True
 
-    if "confRev" not in edit.attributes:
+    if not renamed and "confRev" not in edit.attributes:
         edits.append(SetAttributes(control,
                                    {"confRev": updated_conf_rev(control)}))
     return edits
@@ -531,7 +544,9 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
        `intAddr` means the input outlives the connection, removed where it
        does not, with an emptied `Inputs` removed too;
     3. its `DataSet`, when no other control block in the logical node
-       publishes it;
+       publishes it -- and whatever THAT removal drags along, through A10's
+       :func:`~py61850.scl.remove_data_set`, which is the same expansion a
+       caller removing the dataset directly gets;
     4. its `GSE` or `SMV` address in the `Communication` section.
 
     Step 4 is a divergence from the reference, which documents the other
@@ -547,10 +562,12 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
     **The subscriber set is the one the `src*` attributes name**, and on this
     corpus that is provably the whole of it: of 830,000 elements across three
     vendor exports, **no `ExtRef` bound to a published attribute fails to also
-    name the control block publishing it**. Whether an `ExtRef` bound by data
-    attributes alone should be swept up when the `DataSet` goes is the same
-    question `tDataSet`'s own removal has to answer, and it is answered there
-    once rather than here twice -- see Q19.
+    name the control block publishing it**. What an `ExtRef` bound to a member
+    that publishes a WHOLE data object should do was left to `tDataSet`, and
+    A10 answered it: step 3 now delegates, so an `ExtRef` taking one attribute
+    of a whole-object member is unsubscribed here too, and is not unsubscribed
+    twice -- the ExtRefs step 2 already handled are passed along and skipped.
+    See Q19.
 
     Raises :class:`~py61850.scl.EditRejected` if ``edit`` is not a `Remove` of
     a control block.
@@ -576,7 +593,15 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
 
     data_set = _data_set_of(doc, control)
     if data_set is not None and _is_exclusive(doc, data_set, control):
+        # A10 owns what removing a DataSet drags along, and this is the one
+        # place A9 removes one. The import is deferred because `data_set`
+        # imports this module for `control_blocks` and `updated_conf_rev`:
+        # the dependency runs A10 -> A9 at module level and back only here.
+        from .data_set import _expand_remove_data_set
         edits.append(Remove(data_set))
+        edits.extend(_expand_remove_data_set(
+            doc, data_set, exclude_blocks=(control,), already=subscribers,
+            update_conf_rev=True))
 
     address = control_block_gse_or_smv(doc, control)
     if address is not None:

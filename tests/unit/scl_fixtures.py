@@ -171,11 +171,12 @@ def ldevice(inst, body="", **attrs):
     return f'<LDevice inst="{inst}"{extra}>{body}</LDevice>'
 
 
-def access_point(name="S1", body="", server=True, lns=""):
+def access_point(name="S1", body="", server=True, lns="", services=""):
     """An `<AccessPoint>`. `lns` goes BESIDE the Server, not inside it --
-    that is where 61850-6 puts a gateway's proxy LNs."""
+    that is where 61850-6 puts a gateway's proxy LNs, and `services` after
+    both, where `tAccessPoint`'s sequence puts it."""
     inner = f"<Server>{body}</Server>" if server else body
-    return f'<AccessPoint name="{name}">{inner}{lns}</AccessPoint>'
+    return f'<AccessPoint name="{name}">{inner}{lns}{services}</AccessPoint>'
 
 
 def dai(name, val=None, s_addr=None, body=""):
@@ -195,14 +196,57 @@ def doi(name, body=""):
 
 
 def fcda(ld_inst, ln_class, do_name, fc, prefix="", ln_inst="", da_name=""):
+    """One dataset member.
+
+    ``da_name=None`` OMITS the attribute, which is how the reference corpus
+    writes a member publishing a whole data object -- 3,417 of its 6,967
+    FCDAs, and 1,348 of `siemens.scd`'s 1,603. The default writes
+    ``daName=""``, which this package reads as the same thing everywhere
+    (:func:`py61850.scl.extref._same`) but which is a different byte sequence
+    in the file; a test about Q19 wants the shape the vendors actually wrote.
+    """
+    attr = "" if da_name is None else f' daName="{da_name}"'
     return (f'<FCDA ldInst="{ld_inst}" prefix="{prefix}" lnClass="{ln_class}" '
-            f'lnInst="{ln_inst}" doName="{do_name}" daName="{da_name}" '
+            f'lnInst="{ln_inst}" doName="{do_name}"{attr} '
             f'fc="{fc}"/>')
 
 
 def dataset(name, fcdas=(), desc=""):
-    return (f'<DataSet name="{name}" desc="{desc}">' + "".join(fcdas)
+    """A `<DataSet>`. ``desc=None`` omits the attribute.
+
+    A dataset with no members is expressible here and is NOT valid SCL --
+    `tDataSet` requires at least one `FCDA` -- which is what the tests about
+    `remove_fcda` refusing to empty one are built from.
+    """
+    attr = "" if desc is None else f' desc="{desc}"'
+    return (f'<DataSet name="{name}"{attr}>' + "".join(fcdas)
             + "</DataSet>")
+
+
+def conf_data_set(max_="22", max_attributes="200", modify=None):
+    """A `<ConfDataSet>`: how many datasets an IED takes, and how big.
+
+    Every one of the reference corpus's 58 IEDs carries one, always on the
+    IED-level `Services` and never on an AccessPoint's -- `max` is 22, 32, 50
+    or 150 and `maxAttributes` 200, 468 or 500. Either may be passed ``None``
+    to leave it off, which no corpus file does and both guards treat as
+    unconstrained.
+    """
+    attrs = ""
+    if max_ is not None:
+        attrs += f' max="{max_}"'
+    if max_attributes is not None:
+        attrs += f' maxAttributes="{max_attributes}"'
+    if modify is not None:
+        attrs += f' modify="{modify}"'
+    return f"<ConfDataSet{attrs}/>"
+
+
+def services(*entries):
+    """A `<Services>` element. It goes on an `IED` or on an `AccessPoint`;
+    the reference reads the AccessPoint's first and the IED's if there is
+    none, and no corpus file exercises the first half of that."""
+    return "<Services>" + "".join(entries) + "</Services>"
 
 
 def _dat_set(dat_set):

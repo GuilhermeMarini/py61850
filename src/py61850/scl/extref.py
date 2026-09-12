@@ -386,6 +386,59 @@ def match_data_attributes(doc, ext_ref, fcda) -> bool:
     return True
 
 
+def fcda_covers_ext_ref(doc, ext_ref, fcda) -> bool:
+    """Whether ``fcda`` publishes what ``ext_ref`` takes -- wholly or in part.
+
+    This is :func:`match_data_attributes` widened by exactly one rule: **an
+    `FCDA` that names a data object and no attribute publishes every attribute
+    of it**, so it covers an `ExtRef` bound to one of them. `Ind04` covers
+    `Ind04.stVal`; the reverse is not true, and neither is `Ind04.q` covering
+    `Ind04.stVal`.
+
+    **It is a different question from `match_data_attributes`, which is why it
+    is a different function.** "Is this ExtRef bound to exactly this member"
+    decides what :func:`subscribe` WRITES, and widening it there would blank a
+    correct `daName` with the whole-object FCDA's absent one. "Would removing
+    this member break this ExtRef" decides what a removal has to repair, and
+    the literal answer there leaves a subscription pointing at data that is
+    gone. Q19 records that the two consequences do not want one answer.
+
+    **The corpus is why the rule exists rather than being hypothetical.**
+    Restricted to the dataset the subscribed control block actually publishes,
+    `sel.scd` carries **4** subscriptions of this shape and the other two
+    exports carry none: two `ASV4 GGIO1.Ind04.stVal` and two
+    `PSV2 GGIO1.Ind13.stVal`, each bound while the published dataset carries
+    the data object whole. Half of all dataset members in the corpus -- 3,417
+    FCDAs of 6,967 -- are whole-object, so the structure is everywhere even
+    though the live subscriptions into it are four.
+
+    An empty `daName` and an absent one are the same thing here, as they are
+    everywhere else in this package: a member that names no attribute
+    publishes the object.
+
+    `doName` is compared literally. An FCDA naming `Ind04` does not cover an
+    ExtRef naming the sub-object `Ind04.subDo`, which is a deeper containment
+    question than the corpus asks and than the reference's own declaration
+    -- *"`FCDA` element with or without `daName`"* -- describes.
+
+    **An FCDA naming no data object at all covers nothing.** `doName` is
+    optional in the schema and 5 of `siemens.scd`'s 1,603 members leave it
+    off -- the same 5 :func:`fcda_type` cannot resolve. Comparing an empty
+    `doName` against an empty one would have such a member cover every ExtRef
+    in its logical node that names no data object either.
+    """
+    if not fcda.get("doName"):
+        return False
+    if not _same(ext_ref.get("iedName"), _ied_name(doc, fcda)):
+        return False
+    for name in DATA_ATTRIBUTES[1:-1]:
+        if not _same(ext_ref.get(name), fcda.get(name)):
+            return False
+    if not fcda.get("daName"):
+        return True
+    return _same(ext_ref.get("daName"), fcda.get("daName"))
+
+
 def match_src_attributes(doc, ext_ref, control) -> bool:
     """Whether ``ext_ref``'s ``src*`` attributes name ``control``.
 
@@ -441,11 +494,18 @@ def is_subscribed(doc, fcda, scope) -> bool:
     `Server`, an `LDevice`, a logical node. The question is asked of a source
     list: a dataset member already consumed here is one the engineer does not
     need to be offered again.
+
+    **A whole-object member counts as taken when one of its attributes is
+    bound**, through :func:`fcda_covers_ext_ref` rather than through the
+    literal :func:`match_data_attributes`. The member IS consumed -- what
+    arrives on the wire is the object, and the subscriber is reading a field
+    of it -- and offering it again as unused would be wrong. Q19 records the
+    decision and why the two questions take different answers.
     """
     for ext_ref in scope.iter():
         if strip_ns(ext_ref.tag) != "ExtRef":
             continue
-        if match_data_attributes(doc, ext_ref, fcda):
+        if fcda_covers_ext_ref(doc, ext_ref, fcda):
             return True
     return False
 
