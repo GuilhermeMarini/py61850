@@ -75,7 +75,14 @@ nothing to check it against is how a reader acquires confident wrong answers.
 """
 
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_bytes, reject_dtd_in_file
-from .address import connected_ap_for, create_smv
+from .address import (
+    change_gse_content,
+    change_gse_or_smv_address,
+    change_smv_content,
+    connected_ap_for,
+    create_gse,
+    create_smv,
+)
 from .communication import (
     Address,
     Communication,
@@ -203,5 +210,6 @@ __all__ = [
     "number_report_control_instances", "ReportControlInstances",
     "can_add_sampled_value_control", "create_sampled_value_control",
     "update_sampled_value_control",
-    "create_smv", "connected_ap_for",
+    "create_gse", "create_smv", "change_gse_content",
+    "change_smv_content", "change_gse_or_smv_address", "connected_ap_for",
 ]
