@@ -347,15 +347,29 @@ class SclDocument:
         Raises :class:`~py61850.scl.EditRejected`, having changed nothing. See
         :mod:`py61850.scl.edit` for what that costs and what it guarantees.
 
-        **The lazy caches are not invalidated.** ``.templates``,
+        **The lazy caches are invalidated by ancestry.** ``.templates``,
         ``.communication``, ``.ied_headers`` and each ``ied(name)`` are built
-        on first use and kept; an edit that removes an IED leaves the cached
-        one reachable. Rebuilding them all costs about 1 ms, but re-warming a
-        single ``Ied`` costs 41 ms against 3 ms warm, on a 22 MB export -- a
-        14x tax on exactly the loop an editor runs. What to do about it is a
-        recorded open question, to be answered where the model objects are
-        actually edited; for now, an edited document is best read through a
-        fresh :meth:`parse` or through the tree itself.
+        on first use and kept, and an edit drops the ones its element sits
+        inside: an edit in the `Communication` section forgets
+        ``.communication``, one inside an `IED` forgets that IED and the two
+        name-keyed dictionaries, one in `DataTypeTemplates` forgets
+        ``.templates``, and one on the root forgets everything. Editing one
+        IED therefore leaves the other 57 of a station warm.
+
+        **Every edit kind invalidates, including an attribute edit**, because
+        every model object snapshots what it read: an ``IedHeader`` copies
+        `name`, `type` and `desc` in its constructor, an ``Address`` copies
+        each `P`'s text, and :class:`~py61850.scl.ExtRef` copies all twelve
+        binding attributes. An element that has not moved can still be
+        described wrongly by a cache.
+
+        **This makes an edited document correct to read, not cheap.**
+        Re-warming one ``Ied`` costs 41 ms against 3 ms warm on a 22 MB
+        export, and an edit inside an IED still pays it. That 14x belongs to a
+        read model that snapshots rather than to the invalidation rule; see
+        Q14. A consumer that holds a model object across an edit must still
+        re-read it -- the object is not updated, it is only no longer served
+        to the next caller.
         """
         return _edit.apply_edit(self, edit)
 

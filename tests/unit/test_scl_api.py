@@ -61,6 +61,8 @@ class TestSurface(unittest.TestCase):
             "create_gse", "create_smv", "change_gse_content",
             "change_smv_content", "change_gse_or_smv_address",
             "connected_ap_for",
+            "update_ied", "remove_ied", "IED_NAME_ELEMENTS", "ORPHAN_IED_NAME",
+            "SUPERVISION_LN_CLASSES", "SUPERVISION_REFERENCE_DOS",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

@@ -48,7 +48,7 @@ removes a choice that would otherwise have been ours:
   that is gone is invalid, so :func:`remove_data_set`'s repair of its
   publishers is forced by 61850-6 rather than chosen. The attribute is
   CLEARED rather than the block being removed, because `datSet` is
-  ``use="optional"`` -- and 720 of the corpus's 1,015 control blocks carry
+  ``use="optional"`` -- and 720 of the corpus's 1,014 control blocks carry
   none at all, so a block without one is the ordinary shape and not a
   casualty.
 - **A `DataSet@name` is unique within its logical node.** The same `xs:key`

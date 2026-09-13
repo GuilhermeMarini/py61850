@@ -61,8 +61,8 @@ triggers belong with `tDataSet` and `tFCDA`, where the member edits are;
 :func:`~py61850.scl.updated_conf_rev_edits` its fan-out.
 
 **The step is 10,000, and the reference corpus is what says so.** It looks
-arbitrary until the files are counted: of 1,015 control blocks across three
-vendor tools, **1,014 carry a `confRev` congruent to 1 modulo 10,000** --
+arbitrary until the files are counted: of 1,014 control blocks across three
+vendor tools, **1,013 carry a `confRev` congruent to 1 modulo 10,000** --
 `850001`, `90001`, `1200001` and the rest are `1 + N x 10000`, one GOOSE
 block in the mixed-vendor station standing at `1,890,001`, or 189 data-set
 changes deep. The single exception is one SEL block at `2`. A step of 1 would
@@ -88,7 +88,7 @@ dangling `datSet` references** in all three corpus files under that rule.
 Two things the corpus says about the edges:
 
 - **A block that names no dataset is not a user of one.** 720 of the corpus's
-  1,015 control blocks -- the majority of all report control blocks in it --
+  1,014 control blocks -- the majority of all report control blocks in it --
   carry no `datSet` at all: they are one vendor's unconfigured RCB templates,
   carrying `rptID`, `confRev`, `buffered`, `name` and a `Private`, and nothing
   else. They cannot make a dataset non-exclusive and they cannot lose one.
@@ -171,7 +171,7 @@ from .extref import (
 )
 
 #: What `confRev` moves by when the published data changes. See the module
-#: docstring: 1,014 of the corpus's 1,015 control blocks carry `1 + N x 10000`.
+#: docstring: 1,013 of the corpus's 1,014 control blocks carry `1 + N x 10000`.
 CONF_REV_STEP = 10000
 
 #: The `Communication` element that carries a control block's link-layer
