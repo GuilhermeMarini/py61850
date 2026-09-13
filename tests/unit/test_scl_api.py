@@ -53,6 +53,12 @@ class TestSurface(unittest.TestCase):
             "remove_data_set", "can_add_fcda", "max_attributes",
             "MaxAttributes", "fcda_subscriptions", "remove_fcda",
             "updated_conf_rev_edits",
+            "can_add_report_control", "create_report_control",
+            "update_report_control", "max_report_control", "MaxReportControl",
+            "number_report_control_instances", "ReportControlInstances",
+            "can_add_sampled_value_control", "create_sampled_value_control",
+            "update_sampled_value_control",
+            "create_smv", "connected_ap_for",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

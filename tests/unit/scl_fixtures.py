@@ -140,6 +140,13 @@ def gse(ld_inst, cb_name, addr="", min_time=None, max_time=None):
 
 
 def smv(ld_inst, cb_name, addr=""):
+    """An `<SMV>`: the link-layer address of one `SampledValueControl`.
+
+    `addr` defaults to nothing, and that is valid: `tControlBlock` declares
+    `Address` with `minOccurs="0"`, so an `SMV` naming only the control block
+    it addresses is legal SCL. It is what `create_smv` writes before A17's
+    generators allocate a MAC and an APPID.
+    """
     return f'<SMV ldInst="{ld_inst}" cbName="{cb_name}">{addr}</SMV>'
 
 
@@ -266,9 +273,81 @@ def gse_control(name, dat_set=None, app_id="", conf_rev="1", body=""):
 
 
 def report_control(name, dat_set=None, conf_rev="1", body="", **attrs):
+    """A `<ReportControl>`.
+
+    **The default writes no `OptFields`, and `tReportControl` requires one**
+    -- `minOccurs` defaults to 1 -- so the default shape is NOT valid against
+    2007B4. It is kept as it is because A9's and A10's tests are built on it
+    and neither asks a question `OptFields` could answer. A test that wants
+    the shape a vendor actually writes passes ``body=opt_fields()``, which is
+    what all 852 `ReportControl` elements in the reference corpus carry --
+    720 of them with no attributes at all.
+    """
     extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
     return (f'<ReportControl name="{name}"{_dat_set(dat_set)} '
             f'confRev="{conf_rev}"{extra}>{body}</ReportControl>')
+
+
+def opt_fields(**attrs):
+    """An `<OptFields>`: which fields travel in the report.
+
+    Required by `tReportControl`, and valid with no attributes at all --
+    every attribute in `agOptFields` carries a schema default. 720 of the
+    corpus's 852 blocks write exactly ``<OptFields/>``.
+    """
+    return "<OptFields" + "".join(f' {k}="{v}"' for k, v in sorted(attrs.items())) + "/>"
+
+
+def trg_ops(**attrs):
+    """A `<TrgOps>`: what makes the report fire. `minOccurs="0"`."""
+    return "<TrgOps" + "".join(f' {k}="{v}"' for k, v in sorted(attrs.items())) + "/>"
+
+
+def rpt_enabled(max_="1", body=""):
+    """A `<RptEnabled>`. `@max` defaults to `"1"` in the schema and is how
+    many numbered instances an `indexed` block creates. `minOccurs="0"`, and
+    727 of the corpus's 852 blocks leave it out."""
+    attr = "" if max_ is None else f' max="{max_}"'
+    return f"<RptEnabled{attr}>{body}</RptEnabled>"
+
+
+def smv_opts(**attrs):
+    """A `<SmvOpts>`: what travels in the sampled-value stream. Required by
+    `tSampledValueControl`, exactly as `OptFields` is by `tReportControl`."""
+    return "<SmvOpts" + "".join(f' {k}="{v}"' for k, v in sorted(attrs.items())) + "/>"
+
+
+def conf_report_control(max_="14", max_buf=None, buf_mode=None):
+    """A `<ConfReportControl>`: how many report control blocks an IED takes.
+
+    All 58 reference-corpus IEDs declare one, always on the IED-level
+    `Services` and never on an AccessPoint's -- `max` is 14, 56, 60, 64, 96
+    or 200. **`maxBuf` is declared by only 26 of them**, all in `sel.scd`
+    (7, 12 or 100), so ``None`` is the common shape rather than an edge.
+    `bufMode` is `"both"` on 54 and absent on 2, and nothing reads it.
+    """
+    attrs = ""
+    if max_ is not None:
+        attrs += f' max="{max_}"'
+    if max_buf is not None:
+        attrs += f' maxBuf="{max_buf}"'
+    if buf_mode is not None:
+        attrs += f' bufMode="{buf_mode}"'
+    return f"<ConfReportControl{attrs}/>"
+
+
+def smvsc(max_="4", delivery="multicast", **attrs):
+    """An `<SMVsc>`: how many sampled-value control blocks an IED takes.
+
+    Four `mixed.scd` IEDs declare ``max="4"`` and hold exactly four blocks
+    each -- the only limit in the whole corpus that is actually reached, and
+    the only refusal in A12 that fires on vendor material rather than on a
+    fixture. No other corpus file carries one.
+    """
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    delivered = "" if delivery is None else f' delivery="{delivery}"'
+    limit = "" if max_ is None else f' max="{max_}"'
+    return f"<SMVsc{limit}{delivered}{extra}/>"
 
 
 def smv_control(name, dat_set=None, app_id="4000", conf_rev="1", body=""):

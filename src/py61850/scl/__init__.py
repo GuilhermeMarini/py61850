@@ -75,6 +75,7 @@ nothing to check it against is how a reader acquires confident wrong answers.
 """
 
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_bytes, reject_dtd_in_file
+from .address import connected_ap_for, create_smv
 from .communication import (
     Address,
     Communication,
@@ -104,6 +105,20 @@ from .data_set import (
     remove_fcda,
     update_data_set,
     updated_conf_rev_edits,
+)
+from .report_control import (
+    MaxReportControl,
+    ReportControlInstances,
+    can_add_report_control,
+    create_report_control,
+    max_report_control,
+    number_report_control_instances,
+    update_report_control,
+)
+from .sampled_value_control import (
+    can_add_sampled_value_control,
+    create_sampled_value_control,
+    update_sampled_value_control,
 )
 from .controls import (
     CONTROL_BLOCK_TAGS,
@@ -183,4 +198,10 @@ __all__ = [
     "can_add_data_set", "create_data_set", "update_data_set", "remove_data_set",
     "can_add_fcda", "max_attributes", "MaxAttributes", "fcda_subscriptions",
     "remove_fcda", "updated_conf_rev_edits",
+    "can_add_report_control", "create_report_control", "update_report_control",
+    "max_report_control", "MaxReportControl",
+    "number_report_control_instances", "ReportControlInstances",
+    "can_add_sampled_value_control", "create_sampled_value_control",
+    "update_sampled_value_control",
+    "create_smv", "connected_ap_for",
 ]
