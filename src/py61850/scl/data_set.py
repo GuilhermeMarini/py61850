@@ -264,20 +264,38 @@ def _data_sets_under(scope, namespace) -> int:
 
 # -- the declared limits ----------------------------------------------------
 
-def _conf_data_set(doc, element) -> Optional[Tuple[ET.Element, str, ET.Element]]:
-    """``(ConfDataSet, scope name, scope element)`` governing ``element``.
+def _services_child(doc, element, local_name) -> Optional[Tuple[ET.Element, str, ET.Element]]:
+    """``(declaration, scope name, scope element)`` governing ``element``.
 
-    The `AccessPoint` holding it first and the `IED` second, which is the
-    order the reference documents. ``None`` when neither declares one.
+    ``local_name`` is the `Services` child that carries the limit --
+    `ConfDataSet` here, `ConfReportControl` and `SMVsc` in A12's two modules.
+    The `AccessPoint` holding ``element`` is read first and the `IED` second,
+    which is the order the reference documents for all three. ``None`` when
+    neither declares one, which means unconstrained and not zero.
+
+    **The walk includes ``element`` itself.** A12's `can_add_report_control`
+    accepts an `IED` or an `AccessPoint` as its parent, where A10's guards only
+    ever take a logical node, and an ancestor walk that started at the parent
+    would miss the declaration on the very element it was handed.
+
+    Shared rather than copied: three capabilities across two phases ask the
+    same question of the same tree, and three copies of "which Services
+    governs this element" is how they come to disagree about the
+    AccessPoint-first rule.
     """
-    for local_name in ("AccessPoint", "IED"):
-        owner = _ancestor(doc, element, local_name)
+    for scope in ("AccessPoint", "IED"):
+        owner = element if _is(element, scope) else _ancestor(doc, element, scope)
         if owner is None:
             continue
         for services in _same_ns_children(owner, "Services"):
-            for conf in _same_ns_children(services, "ConfDataSet"):
-                return conf, local_name, owner
+            for declaration in _same_ns_children(services, local_name):
+                return declaration, scope, owner
     return None
+
+
+def _conf_data_set(doc, element) -> Optional[Tuple[ET.Element, str, ET.Element]]:
+    """``(ConfDataSet, scope name, scope element)`` governing ``element``."""
+    return _services_child(doc, element, "ConfDataSet")
 
 
 def _limit(conf, attribute) -> Optional[int]:
