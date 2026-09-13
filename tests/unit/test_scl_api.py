@@ -58,7 +58,9 @@ class TestSurface(unittest.TestCase):
             "number_report_control_instances", "ReportControlInstances",
             "can_add_sampled_value_control", "create_sampled_value_control",
             "update_sampled_value_control",
-            "create_smv", "connected_ap_for",
+            "create_gse", "create_smv", "change_gse_content",
+            "change_smv_content", "change_gse_or_smv_address",
+            "connected_ap_for",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

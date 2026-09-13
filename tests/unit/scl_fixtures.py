@@ -22,6 +22,12 @@ def scl(*sections, **kwargs):
     ``ns=False`` drops the namespace declaration entirely -- hand-made SCDs
     that declare none are real, and every reader here must survive them.
 
+    ``xsi=True`` declares the ``XMLSchema-instance`` prefix on the root, which
+    a document has to do before any `P` may carry an `xsi:type`. Two of the
+    three corpus files declare it through their ``xsi:schemaLocation``;
+    `sel.scd` declares no such prefix at all, which is why it is off by
+    default here.
+
     ``version``/``revision``/``release`` set the SCHEMA EDITION attributes on
     the ``<SCL>`` root itself, as the standard puts them -- real files carry
     ``version="2007" revision="B" release="4"`` there, quite apart from
@@ -29,11 +35,14 @@ def scl(*sections, **kwargs):
     a test that does not care about the edition gets none.
     """
     ns = kwargs.pop("ns", True)
+    xsi = kwargs.pop("xsi", False)
     version = kwargs.pop("version", None)
     revision = kwargs.pop("revision", None)
     release = kwargs.pop("release", None)
     assert not kwargs, kwargs
     decl = f' xmlns="{SCL_NS}"' if ns else ""
+    if xsi:
+        decl += ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
     root_attrs = ""
     if version is not None:
         root_attrs += f' version="{version}"'
@@ -122,11 +131,25 @@ def enum_type(id_, values=()):
     return f'<EnumType id="{id_}">{inner}</EnumType>'
 
 
-def address(**params):
+def address(inst_type=False, **params):
     """`<Address>` with one `<P type=...>` per keyword. Use `P_IP=...` style
-    keys; underscores in the key become dashes in the type."""
-    inner = "".join(f'<P type="{k.replace("_", "-")}">{v}</P>'
-                    for k, v in sorted(params.items()))
+    keys; underscores in the key become dashes in the type.
+
+    Keywords are written in the order they are given, NOT sorted: the corpus
+    writes three different `P` orders across its 162 addresses and A11 is the
+    phase that must not disturb whichever one a file used, so a fixture that
+    could only express one order would hide exactly that.
+
+    ``inst_type=True`` adds `xsi:type="tP_..."`, which is what turns the
+    derived types' value patterns on -- see `py61850.scl.address`. 123 of the
+    corpus's 648 GSE/SMV `P` elements carry it and 39 do not, split by the
+    tool that wrote the IED rather than the one that wrote the file.
+    """
+    inner = ""
+    for key, value in params.items():
+        p_type = key.replace("_", "-")
+        typed = f' xsi:type="tP_{p_type}"' if inst_type else ""
+        inner += f'<P type="{p_type}"{typed}>{value}</P>'
     return f"<Address>{inner}</Address>"
 
 
