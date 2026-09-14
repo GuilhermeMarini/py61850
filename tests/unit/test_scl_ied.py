@@ -20,6 +20,7 @@ and the corpus pins that the behaviour survives 830,000 elements of real
 vendor markup.
 """
 
+import os
 import tempfile
 import unittest
 from collections import Counter
@@ -1690,7 +1691,16 @@ class TestInsertCorpus(unittest.TestCase):
         target.apply_edit(edits)
         data = target.to_bytes()
         with tempfile.TemporaryDirectory() as directory:
-            path = fx.write(directory, "out.scd", data.decode("utf-8"))
+            # Binary, not `fx.write`. That helper opens in TEXT mode, which on
+            # Windows translates every "\n" to "\r\n" -- and two of the three
+            # corpus files already use "\r\n", so the bytes read back carry
+            # doubled carriage returns and this assertion fails for a reason
+            # that has nothing to do with the edit. The round trip under test
+            # is the library's, so the file has to leave and re-enter as the
+            # exact bytes it serialised to.
+            path = os.path.join(directory, "out.scd")
+            with open(path, "wb") as handle:
+                handle.write(data)
             self.assertEqual(SclDocument.parse(path).to_bytes(), data)
 
     def test_the_sections_stay_in_schema_order(self):
