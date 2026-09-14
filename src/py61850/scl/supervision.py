@@ -756,6 +756,22 @@ def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,
             # for rather than arrived at -- the same reason `remove_fcda`
             # refuses to empty a dataset instead of cascading into
             # `remove_data_set`.
+            # Two different situations wore one message until A15, and the
+            # difference is the whole of whether the advice is usable. An IED
+            # holding supervision nodes that are all taken CAN be given
+            # another, so `new_supervision_ln=True` is the answer. An IED
+            # holding NONE -- seven of them in the corpus, Q33 §2 -- has no
+            # sibling to read an `lnType` and an `LDevice` off, so that flag
+            # refuses a second time for the real reason. Saying so here turns
+            # a dead end into an instruction, which is what Q33 §11 left for
+            # this phase.
+            if not _supervision_lns(doc, subscriber, ln_class):
+                raise EditRejected(
+                    f"IED {subscriber.get('name')!r} holds no {ln_class} at "
+                    f"all, so there is no sibling to take an lnType and an "
+                    f"LDevice from; import an {ln_class} LNodeType with "
+                    f"import_lnode_types and pass new_supervision_ln=True "
+                    f"with ln_type and parent")
             raise EditRejected(
                 f"IED {subscriber.get('name')!r} has no free {ln_class} to "
                 f"store {obj_ref} in; pass new_supervision_ln=True to add one")

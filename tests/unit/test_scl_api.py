@@ -67,6 +67,9 @@ class TestSurface(unittest.TestCase):
             "max_supervision", "is_src_ref_editable",
             "can_instantiate_supervision", "instantiate_supervision",
             "can_remove_supervision", "remove_supervision", "LN_INST_RANGE",
+            "same_data_type", "lnode_type_conflicts", "TypeImport",
+            "import_lnode_types", "update_lnode_type", "remove_data_type",
+            "DATA_TYPE_TAGS", "ON_CONFLICT",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
