@@ -232,6 +232,7 @@ from .extref import unsubscribe
 from .supervision import (
     SUPERVISION_LN_CLASSES,
     SUPERVISION_REFERENCE_DOS,
+    _retext,
     _supervision_values,
 )
 
@@ -377,23 +378,6 @@ def _object_reference_index(doc) -> Dict[str, Optional[str]]:
             else:
                 index.setdefault(reference, owner)
     return index
-
-
-def _retext(element, text: Optional[str]) -> SetTextContent:
-    """A :class:`~py61850.scl.SetTextContent` that keeps the element's own
-    leading and trailing whitespace.
-
-    An object reference and an `IEDName` are both types derived from
-    ``xs:normalizedString``, so no corpus file indents one -- but a file that
-    did would otherwise have its indentation eaten by a rename, and the round
-    trip is what this project measures itself on.
-    """
-    raw = element.text or ""
-    if text is None:
-        return SetTextContent(element, None)
-    lead = raw[:len(raw) - len(raw.lstrip())]
-    trail = raw[len(raw.rstrip()):]
-    return SetTextContent(element, lead + text + trail)
 
 
 # -- renaming ---------------------------------------------------------------

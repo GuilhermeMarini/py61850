@@ -24,6 +24,7 @@ import tempfile
 import unittest
 
 from py61850.scl import (
+    Connection,
     EditRejected,
     Insert,
     LN_INST_RANGE,
@@ -38,14 +39,25 @@ from py61850.scl import (
     is_src_ref_editable,
     iter_local,
     max_supervision,
+    remove_control_block,
+    remove_data_set,
+    remove_fcda,
     remove_supervision,
+    subscribe,
     supervision_ln_class,
+    unsubscribe,
+)
+from py61850.scl import (
+    find_control_block_subscription,
+    source_control_block,
 )
 from py61850.scl.supervision import (
     _bound_supervisions,
     _first_free,
     _supervised_reference,
+    _ied_of,
     _supervision_lns,
+    _watching,
 )
 from tests.unit import roundtrip
 from tests.unit import scl_fixtures as fx
@@ -54,19 +66,64 @@ PUB_CB_REF = "PUBLD/LLN0.GC1"
 PUB_SV_REF = "PUBLD/LLN0.SV1"
 
 
-def publisher(name="PUB"):
-    """One IED publishing a GOOSE block and a sampled-value block."""
-    body = fx.dataset("DS1", (fx.fcda("LD", "MMXU", "TotW", "MX"),))
+def publisher(name="PUB", blocks=None, reports=False, members=1):
+    """One IED publishing a GOOSE block and a sampled-value block.
+
+    ``blocks`` names extra `GSEControl` elements, which the batch tests need:
+    two supervisions planned in one call is only expressible with two blocks
+    to supervise. ``reports`` adds a `ReportControl`, which nothing supervises
+    and which therefore has to produce nothing rather than an error.
+    """
+    # A second member exists only so that `remove_fcda` has something to
+    # remove without emptying the dataset, which it refuses to do (Q27).
+    fcdas = [fx.fcda("LD", "MMXU", "TotW", "MX")][:1] + (
+        [fx.fcda("LD", "MMXU", "TotVAr", "MX")] if members > 1 else [])
+    body = fx.dataset("DS1", tuple(fcdas))
     body += fx.gse_control("GC1", dat_set="DS1", app_id="PUB_APP")
+    for extra in (blocks or ()):
+        body += fx.gse_control(extra, dat_set="DS1", app_id=f"PUB_{extra}")
+    if reports:
+        body += fx.report_control("RC1", dat_set="DS1")
     body += fx.smv_control("SV1", dat_set="DS1")
     return fx.ied(name, fx.access_point(
         "S1", fx.ldevice("LD", fx.ln0(body=body))))
 
 
+def subscribed(cb_name="GC1", int_addr="in1", do_name="TotW"):
+    """An `ExtRef` bound to one of :func:`publisher`'s GOOSE blocks.
+
+    `intAddr` is written so that unsubscribing BLANKS the element and keeps
+    it, which makes the supervision assertions readable -- the node is still
+    findable afterwards. Which of the two shapes an `ExtRef` has changes
+    nothing about supervision: what the expansion reads is `srcCBName`, and it
+    reads it before anything is applied.
+    """
+    return fx.ext_ref(iedName="PUB", ldInst="LD", lnClass="MMXU",
+                      doName=do_name, daName="mag.f", intAddr=int_addr,
+                      serviceType="GOOSE", srcCBName=cb_name,
+                      srcLDInst="LD", srcLNClass="LLN0")
+
+
+def unbound(int_addr="free1"):
+    """An `ExtRef` carrying only an internal address -- an input the IED
+    published and nothing is connected to yet. It is what `subscribe` binds,
+    and it declares no `p*` restriction, so nothing here is testing A8's
+    type checks by accident."""
+    return fx.ext_ref(intAddr=int_addr)
+
+
 def subscriber(name="SUB", nodes=(), services=None, ld_inst="CFG",
-               extra_ldevices=""):
-    """One IED whose `CFG` logical device holds the supervision nodes given."""
-    inner = fx.ldevice(ld_inst, fx.ln0() + "".join(nodes)) + extra_ldevices
+               extra_ldevices="", inputs=()):
+    """One IED whose `CFG` logical device holds the supervision nodes given.
+
+    ``inputs`` are `ExtRef` elements for the `LN0`'s `Inputs`, which the
+    wiring tests need and the A14 tests did not: supervision is written and
+    removed because of subscriptions, and until this phase nothing here had
+    any.
+    """
+    body = fx.inputs(*inputs) if inputs else ""
+    inner = fx.ldevice(ld_inst, fx.ln0(body=body) + "".join(nodes)) \
+        + extra_ldevices
     return fx.ied(name, fx.access_point("S1", inner),
                   **({} if services is None else {}))
 
@@ -87,14 +144,16 @@ def station_text(*ieds, **kwargs):
     return fx.scl(fx.header(), *(list(ieds) + [fx.templates(*types)]))
 
 
-def with_services(name, nodes, entries):
+def with_services(name, nodes, entries, inputs=()):
     """A subscriber IED carrying a `Services` section.
 
     `Services` goes after `AccessPoint` in `tIED`'s sequence, which is why it
     is spelled here rather than passed to :func:`subscriber`.
     """
+    body = fx.inputs(*inputs) if inputs else ""
     return fx.ied(name,
-                  fx.access_point("S1", fx.ldevice("CFG", fx.ln0() + "".join(nodes)))
+                  fx.access_point("S1", fx.ldevice(
+                      "CFG", fx.ln0(body=body) + "".join(nodes)))
                   + fx.services(*entries))
 
 
@@ -907,6 +966,397 @@ class TestInvertibility(SupervisionCase):
             remove_supervision_ln=True))
 
 
+# -- the wiring: what the seven flags actually do ---------------------------
+#
+# A14b's own tests. The seven `ignore_supervision` flags stop refusing and
+# start working, and what each `False` means is asserted here because this is
+# where the fixtures that can express it live -- a publisher, a subscriber
+# with supervision nodes, and `ExtRef` elements between them. The five modules
+# that CALL this one assert what their own station can say and no more.
+
+class WiringCase(DocumentCase):
+    """A publisher, and a subscriber that both subscribes to it and could
+    supervise it."""
+
+    def build(self, nodes=(), inputs=(), blocks=None, reports=False,
+              services=None, members=1):
+        doc = self.station(publisher(blocks=blocks, reports=reports,
+                                     members=members),
+                           subscriber(nodes=nodes, inputs=inputs)
+                           if services is None
+                           else with_services("SUB", nodes, services,
+                                              inputs=inputs))
+        self.doc = doc
+        self.pub = ied_of(doc, "PUB")
+        self.sub = ied_of(doc, "SUB")
+        return doc
+
+    def block(self, name="GC1"):
+        return find(self.doc, "GSEControl", name=name)
+
+    def fcda(self):
+        return next(iter_local(self.doc.root, "FCDA"))
+
+    def ext_refs(self):
+        return [element for element in iter_local(self.sub, "ExtRef")]
+
+    def watched(self, ln_class="LGOS"):
+        return [_supervised_reference(self.doc, node)
+                for node in _supervision_lns(self.doc, self.sub, ln_class)]
+
+
+class TestSubscribeWiring(WiringCase):
+    """`subscribe(..., ignore_supervision=False)` instantiates what each
+    connection implies."""
+
+    def connect(self, sink=None, block="GC1"):
+        return Connection(sink if sink is not None else self.ext_refs()[0],
+                          self.fcda(), self.block(block))
+
+    def test_a_free_slot_is_filled_with_the_blocks_object_reference(self):
+        self.build(nodes=(fx.supervision(inst="1"),), inputs=(unbound(),))
+        self.assertEqual(self.watched(), [""])
+        self.doc.apply_edit(subscribe(self.doc, self.connect(),
+                                      ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF])
+
+    def test_the_default_writes_none_of_it(self):
+        """`True` is the default and stays it. Flipping to the reference's
+        `false` would change what every existing caller writes into a file,
+        which A18's MINOR rule forbids -- Q32 §9."""
+        self.build(nodes=(fx.supervision(inst="1"),), inputs=(unbound(),))
+        self.doc.apply_edit(subscribe(self.doc, self.connect()))
+        self.assertEqual(self.watched(), [""])
+
+    def test_a_block_this_ied_already_supervises_is_left_alone(self):
+        """**Skipped, not refused.** 548 of the corpus's 566 (subscriber,
+        control block) pairs are already supervised, so the duplicate is the
+        ordinary case here -- where for a caller asking for ONE supervision it
+        is an error, which is what `instantiate_supervision` still says."""
+        self.build(nodes=(fx.supervision(inst="1", cb_ref=PUB_CB_REF),
+                          fx.supervision(inst="2")),
+                   inputs=(unbound(),))
+        self.doc.apply_edit(subscribe(self.doc, self.connect(),
+                                      ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF, ""])
+
+    def test_two_extrefs_to_one_block_are_one_supervision(self):
+        """One subscription to supervise, not two. 531 of the corpus's 566
+        pairs carry more than one `ExtRef`, so this is the common shape."""
+        self.build(nodes=(fx.supervision(inst="1"), fx.supervision(inst="2")),
+                   inputs=(unbound("a"), unbound("b")))
+        refs = self.ext_refs()
+        self.doc.apply_edit(subscribe(
+            self.doc, [self.connect(refs[0]), self.connect(refs[1])],
+            ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF, ""])
+
+    def test_a_report_control_produces_no_supervision(self):
+        """61850-7-4 defines `LGOS` for a `GSEControl` and `LSVS` for a
+        `SampledValueControl` and no report equivalent, so there is nothing to
+        write -- and nothing to complain about either."""
+        self.build(nodes=(fx.supervision(inst="1"),), inputs=(unbound(),),
+                   reports=True)
+        connection = Connection(self.ext_refs()[0], self.fcda(),
+                                find(self.doc, "ReportControl", name="RC1"))
+        self.doc.apply_edit(subscribe(self.doc, connection,
+                                      ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_a_connection_naming_no_control_block_produces_none_either(self):
+        """An Edition 1 subscription names no control block at all, so there
+        is nothing to supervise and no way to find out what would be."""
+        self.build(nodes=(fx.supervision(inst="1"),), inputs=(unbound(),))
+        connection = Connection(self.ext_refs()[0], self.fcda(), None)
+        self.doc.apply_edit(subscribe(self.doc, connection,
+                                      ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_no_free_slot_refuses_rather_than_building_one(self):
+        """Q27's rule, which A14 already applied to
+        `instantiate_supervision`: "fill in a free slot" and "add a logical
+        node to this IED" are different sizes of action and the larger is
+        asked for. 45 of the corpus's 59 (IED, class) blocks are fully bound,
+        so this is the common answer and not an edge."""
+        self.build(nodes=(fx.supervision(inst="1", cb_ref="PUBLD/LLN0.OTHER"),),
+                   inputs=(unbound(),))
+        before = self.doc.to_bytes()
+        with self.assertRaises(EditRejected) as caught:
+            subscribe(self.doc, self.connect(), ignore_supervision=False)
+        self.assertIn("no free LGOS", str(caught.exception))
+        self.assertEqual(self.doc.to_bytes(), before)
+
+    def test_a_caller_who_means_it_may_build_one(self):
+        self.build(nodes=(fx.supervision(inst="1", cb_ref="PUBLD/LLN0.OTHER"),),
+                   inputs=(unbound(),))
+        self.doc.apply_edit(subscribe(self.doc, self.connect(),
+                                      ignore_supervision=False,
+                                      new_supervision_ln=True))
+        self.assertEqual(self.watched(), ["PUBLD/LLN0.OTHER", PUB_CB_REF])
+
+    def test_an_ied_with_no_supervision_node_at_all_refuses_both_ways(self):
+        """**All 16 unsupervised subscriptions in the corpus are this shape**,
+        on the seven IEDs that hold no supervision node at all. A new node
+        would need an `lnType` only `importLNodeType` can supply, so neither
+        the default nor `new_supervision_ln=True` can serve them -- which is
+        what makes the refusal decision in Q33 the one that matters."""
+        self.build(inputs=(unbound(),))
+        with self.assertRaises(EditRejected):
+            subscribe(self.doc, self.connect(), ignore_supervision=False)
+        with self.assertRaises(EditRejected) as caught:
+            subscribe(self.doc, self.connect(), ignore_supervision=False,
+                      new_supervision_ln=True)
+        self.assertIn("lnType", str(caught.exception))
+
+    def test_the_binding_and_the_supervision_are_one_history_entry(self):
+        self.build(nodes=(fx.supervision(inst="1"),), inputs=(unbound(),))
+        before = self.doc.to_bytes()
+        undo = self.doc.apply_edit(subscribe(self.doc, self.connect(),
+                                             ignore_supervision=False))
+        self.assertNotEqual(self.doc.to_bytes(), before)
+        self.doc.apply_edit(undo)
+        self.assertEqual(self.doc.to_bytes(), before)
+
+
+class TestSubscribeBatchClaims(WiringCase):
+    """**Two supervisions planned in one call cannot take the same slot.**
+
+    Every question this module asks is asked of the DOCUMENT, and inside one
+    compound edit the document is out of date -- nothing is applied until the
+    caller applies the whole list. So without `_Batch` the second connection
+    would pick the same free `LGOS` as the first, the second `SetTextContent`
+    would overwrite the first, and one supervision would be lost with no error
+    anywhere. The reference keeps a `usedSupervisions` set for exactly this,
+    and `subscribe` already keeps `created_inputs` for the identical hazard
+    one level down.
+
+    It is not an edge: 8 of the corpus's 59 (IED, class) blocks hold exactly
+    one free slot, and one IED subscribes to 33 distinct control blocks.
+    """
+
+    def two(self):
+        self.build(nodes=(fx.supervision(inst="1"), fx.supervision(inst="2")),
+                   inputs=(unbound("a"), unbound("b")), blocks=("GC2",))
+        refs = self.ext_refs()
+        return [Connection(refs[0], self.fcda(), self.block("GC1")),
+                Connection(refs[1], self.fcda(), self.block("GC2"))]
+
+    def test_two_supervisions_in_one_call_take_two_slots(self):
+        connections = self.two()
+        self.doc.apply_edit(subscribe(self.doc, connections,
+                                      ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF, "PUBLD/LLN0.GC2"])
+
+    def test_neither_reference_is_lost(self):
+        """The failure this guards against is silent, so it is worth asserting
+        from the other side too: both references are in the file, and the
+        edits are on two different elements."""
+        connections = self.two()
+        edits = subscribe(self.doc, connections, ignore_supervision=False)
+        targets = [id(e.element) for e in edits
+                   if isinstance(e, SetTextContent)]
+        self.assertEqual(len(targets), 2)
+        self.assertEqual(len(set(targets)), 2)
+
+    def test_two_new_logical_nodes_in_one_call_get_different_insts(self):
+        """The same collision one level down: `_free_inst` scans the document,
+        which does not yet hold the node the first connection is adding."""
+        self.build(nodes=(fx.supervision(inst="1", cb_ref="PUBLD/LLN0.OTHER"),),
+                   inputs=(unbound("a"), unbound("b")), blocks=("GC2",))
+        refs = self.ext_refs()
+        self.doc.apply_edit(subscribe(self.doc, [
+            Connection(refs[0], self.fcda(), self.block("GC1")),
+            Connection(refs[1], self.fcda(), self.block("GC2"))],
+            ignore_supervision=False, new_supervision_ln=True))
+        nodes = _supervision_lns(self.doc, self.sub, "LGOS")
+        self.assertEqual([node.get("inst") for node in nodes],
+                         ["1", "2", "3"])
+        self.assertEqual(self.watched(),
+                         ["PUBLD/LLN0.OTHER", PUB_CB_REF, "PUBLD/LLN0.GC2"])
+
+    def test_a_batch_cannot_spend_the_last_declared_place_twice(self):
+        """`Services/SupSubscription` counts BOUND references -- Q32 §4 -- and
+        the count a batch has to work from is the document's plus what this
+        same edit has already promised. With `maxGo="1"` and two free slots,
+        the second connection is over the limit even though the file still
+        shows none bound."""
+        self.build(nodes=(fx.supervision(inst="1"), fx.supervision(inst="2")),
+                   inputs=(unbound("a"), unbound("b")), blocks=("GC2",),
+                   services=(fx.sup_subscription(max_go="1"),))
+        refs = self.ext_refs()
+        before = self.doc.to_bytes()
+        with self.assertRaises(EditRejected) as caught:
+            subscribe(self.doc, [
+                Connection(refs[0], self.fcda(), self.block("GC1")),
+                Connection(refs[1], self.fcda(), self.block("GC2"))],
+                ignore_supervision=False)
+        self.assertIn("maxGo=1", str(caught.exception))
+        self.assertEqual(self.doc.to_bytes(), before)
+
+    def test_one_of_them_alone_is_inside_the_limit(self):
+        """The other half of the test above: the refusal is the batch's doing,
+        not the limit refusing everything."""
+        self.build(nodes=(fx.supervision(inst="1"), fx.supervision(inst="2")),
+                   inputs=(unbound("a"),),
+                   services=(fx.sup_subscription(max_go="1"),))
+        self.doc.apply_edit(subscribe(
+            self.doc, Connection(self.ext_refs()[0], self.fcda(),
+                                 self.block("GC1")),
+            ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF, ""])
+
+
+class TestUnsubscribeWiring(WiringCase):
+    """`unsubscribe(..., ignore_supervision=False)` blanks the supervision
+    whose LAST `ExtRef` is going."""
+
+    def bound(self, refs=("in1",), cb="GC1", nodes=None):
+        if nodes is None:
+            nodes = (fx.supervision(inst="1", cb_ref=PUB_CB_REF),)
+        self.build(nodes=nodes,
+                   inputs=tuple(subscribed(cb, addr) for addr in refs))
+        return self.ext_refs()
+
+    def test_the_last_extref_going_blanks_it(self):
+        refs = self.bound()
+        self.doc.apply_edit(unsubscribe(self.doc, refs,
+                                        ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_an_extref_that_is_not_the_last_leaves_it_standing(self):
+        """**The rule is about a SET.** Only 35 of the corpus's 566 pairs
+        carry a single `ExtRef` and the busiest block carries 64, so judging
+        one call at a time would make the answer depend on the order the
+        caller happened to ask in. Q27's argument for `remove_fcda`'s list,
+        arriving at `unsubscribe`."""
+        refs = self.bound(refs=("in1", "in2"))
+        self.doc.apply_edit(unsubscribe(self.doc, refs[0],
+                                        ignore_supervision=False))
+        self.assertEqual(self.watched(), [PUB_CB_REF])
+
+    def test_all_of_them_going_together_blanks_it_once(self):
+        refs = self.bound(refs=("in1", "in2", "in3"))
+        edits = unsubscribe(self.doc, refs, ignore_supervision=False)
+        blanks = [e for e in edits if isinstance(e, SetTextContent)]
+        self.assertEqual(len(blanks), 1)
+        self.doc.apply_edit(edits)
+        self.assertEqual(self.watched(), [""])
+
+    def test_two_spellings_of_one_binding_are_still_one_block(self):
+        """**An absent attribute and an empty one are the same value here**,
+        which `_same` says and `find_control_block_subscription` relies on --
+        SCL omits `srcPrefix` rather than writing it empty, and a comparison
+        that told them apart would call an `ExtRef` unbound from the block it
+        is bound to.
+
+        So two ExtRefs on one control block can be spelled differently and
+        group differently. Counting each group's own departures would then let
+        each see the OTHER's as ExtRefs that are staying, and a supervision
+        whose every subscription was going would be left watching nothing that
+        exists. The departures are counted once for the whole call instead.
+        """
+        self.build(nodes=(fx.supervision(inst="1", cb_ref=PUB_CB_REF),),
+                   inputs=(subscribed("GC1", "in1"),
+                           fx.ext_ref(iedName="PUB", ldInst="LD",
+                                      lnClass="MMXU", doName="TotW",
+                                      daName="mag.f", intAddr="in2",
+                                      serviceType="GOOSE", srcCBName="GC1",
+                                      srcLDInst="LD", srcLNClass="LLN0",
+                                      srcPrefix="")))
+        refs = self.ext_refs()
+        self.assertNotEqual(refs[0].get("srcPrefix"), refs[1].get("srcPrefix"))
+        self.doc.apply_edit(unsubscribe(self.doc, refs,
+                                        ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_the_default_leaves_the_supervision_standing(self):
+        refs = self.bound()
+        self.doc.apply_edit(unsubscribe(self.doc, refs))
+        self.assertEqual(self.watched(), [PUB_CB_REF])
+
+    def test_the_node_is_kept_and_only_the_value_goes(self):
+        """`remove_supervision`'s default, which is also the edit A13's
+        `remove_ied` emits -- the same primitive on the same element, so the
+        three paths cannot drift. Two unrelated vendors write an idle
+        supervision node rather than deleting one, 49 times between them."""
+        refs = self.bound()
+        edits = unsubscribe(self.doc, refs, ignore_supervision=False)
+        self.assertEqual([e for e in edits if isinstance(e, Remove)], [])
+        blanks = [e for e in edits if isinstance(e, SetTextContent)]
+        self.assertEqual([e.text for e in blanks], [None])
+        self.doc.apply_edit(edits)
+        self.assertEqual(len(_supervision_lns(self.doc, self.sub, "LGOS")), 1)
+
+    def test_a_supervision_of_another_block_is_not_touched(self):
+        refs = self.bound(nodes=(
+            fx.supervision(inst="1", cb_ref=PUB_CB_REF),
+            fx.supervision(inst="2", cb_ref="PUBLD/LLN0.OTHER")))
+        self.doc.apply_edit(unsubscribe(self.doc, refs,
+                                        ignore_supervision=False))
+        self.assertEqual(self.watched(), ["", "PUBLD/LLN0.OTHER"])
+
+    def test_it_is_one_history_entry(self):
+        refs = self.bound()
+        before = self.doc.to_bytes()
+        undo = self.doc.apply_edit(unsubscribe(self.doc, refs,
+                                               ignore_supervision=False))
+        self.assertNotEqual(self.doc.to_bytes(), before)
+        self.doc.apply_edit(undo)
+        self.assertEqual(self.doc.to_bytes(), before)
+
+
+class TestRemovalWiringReachesSupervision(WiringCase):
+    """The three removal functions own no expansion of their own except
+    `remove_control_block`'s block-driven sweep; the rest reaches supervision
+    through the `unsubscribe` they already perform. These assert the chain
+    actually arrives, which the callers' own test modules cannot: their
+    stations hold no supervision node."""
+
+    def bound(self, refs=("in1",), members=1):
+        self.build(nodes=(fx.supervision(inst="1", cb_ref=PUB_CB_REF),),
+                   inputs=tuple(subscribed("GC1", addr) for addr in refs),
+                   members=members)
+
+    def test_removing_the_dataset_blanks_it_through_unsubscribe(self):
+        self.bound()
+        data_set = find(self.doc, "DataSet", name="DS1")
+        self.doc.apply_edit(remove_data_set(self.doc, Remove(data_set),
+                                            ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_removing_the_last_member_blanks_it_too(self):
+        """`remove_fcda`'s supervision half is almost always a no-op -- a
+        member only empties a pair when it unbinds that pair's last `ExtRef`,
+        and 531 of 566 pairs have more than one. This is the 35-pair case
+        where it is not nothing."""
+        self.bound(members=2)
+        member = next(iter_local(self.doc.root, "FCDA"))
+        self.doc.apply_edit(remove_fcda(self.doc, Remove(member),
+                                        ignore_supervision=False,
+                                        update_conf_rev=False))
+        self.assertEqual(self.watched(), [""])
+
+    def test_the_default_reaches_none_of_it(self):
+        self.bound()
+        data_set = find(self.doc, "DataSet", name="DS1")
+        self.doc.apply_edit(remove_data_set(self.doc, Remove(data_set)))
+        self.assertEqual(self.watched(), [PUB_CB_REF])
+
+    def test_removing_the_block_blanks_it_even_with_nothing_subscribed(self):
+        """**The block-driven sweep, and the case that tells it apart from the
+        ExtRef-driven one.** Here the supervision names a block nobody
+        subscribes to -- which happens 0 times in the corpus, so the two
+        readings agree on every real file and only a fixture can separate
+        them. A13's `remove_ied` already sweeps this way; without it, removing
+        an IED and removing one of its control blocks would leave different
+        supervision behind. Q33."""
+        self.build(nodes=(fx.supervision(inst="1", cb_ref=PUB_CB_REF),))
+        self.assertEqual(self.watched(), [PUB_CB_REF])
+        self.doc.apply_edit(remove_control_block(
+            self.doc, Remove(self.block("GC1")), ignore_supervision=False))
+        self.assertEqual(self.watched(), [""])
+
+
 # -- the reference corpus ---------------------------------------------------
 
 class TestCorpus(DocumentCase):
@@ -1123,6 +1573,176 @@ class TestCorpus(DocumentCase):
             doc.apply_edit(back)
             doc.apply_edit(undo)
             self.assertEqual(doc.to_bytes(), before, name)
+
+
+class TestWiringCorpus(TestCorpus):
+    """What the seven flags do against 830,000 elements of vendor markup.
+
+    A14's `TestCorpus` above pins the measurements the MODULE's decisions rest
+    on; these pin the ones A14b's decisions rest on, and each of them can
+    falsify a decision rather than merely exercise a path.
+    """
+
+    def pairs(self, doc):
+        """``{(id(subscriber IED), object reference): [ExtRef, ...]}`` for
+        every Edition 2 subscription to a GOOSE or sampled-value block."""
+        namespace = self.namespace(doc)
+        found = {}
+        for ied in self.ieds(doc):
+            for ext_ref in ied.iter(namespace + "ExtRef"):
+                if ext_ref.get("serviceType") not in ("GOOSE", "SMV"):
+                    continue
+                if not ext_ref.get("srcCBName"):
+                    continue
+                block = source_control_block(doc, ext_ref)
+                if block is None:
+                    continue
+                reference = control_block_obj_ref(doc, block)
+                if reference:
+                    found.setdefault((id(ied), ied, reference, block),
+                                     []).append(ext_ref)
+        return found
+
+    def test_every_unsupervised_subscription_refuses_for_one_reason(self):
+        """**16 of 16, and all on the seven IEDs that hold no supervision node
+        at all.** This is the measurement the refusal decision turns on: with
+        `ignore_supervision=False`, `subscribe` cannot close a single one of
+        the corpus's supervision gaps, because closing one needs an `LNodeType`
+        that `importLNodeType` has not been written to import yet.
+
+        If this ever drops below 16, either the corpus changed or a new
+        logical node is being built where A14 said it could not be -- and both
+        are things a reader of Q33 should be told about loudly.
+        """
+        refused = supervised = 0
+        for name in self.FILES:
+            doc = self.corpus(name)
+            for (_key, ied, reference, block), _refs in self.pairs(doc).items():
+                ln_class = supervision_ln_class(block)
+                if _watching(doc, ied, ln_class, reference) is not None:
+                    supervised += 1
+                    continue
+                self.assertEqual(_supervision_lns(doc, ied, ln_class), [],
+                                 f"{name} {ied.get('name')} {reference}")
+                self.assertFalse(can_instantiate_supervision(
+                    doc, Supervision(ied, block)))
+                refused += 1
+        self.assertEqual((supervised, refused), (548, 16))
+
+    def test_no_supervision_survives_without_a_subscription(self):
+        """**0 of 549**, and it is why the two readings of "remove the
+        supervision of a removed control block" cannot be told apart by any
+        file we have.
+
+        `remove_control_block` sweeps by the BLOCK and `unsubscribe` by the
+        `ExtRef`s; the block sweep is a superset, and this is the measurement
+        saying the extra is empty here. A13's `remove_ied` is what breaks the
+        tie, not the corpus. Q33.
+        """
+        orphans = 0
+        for name in self.FILES:
+            doc = self.corpus(name)
+            subscribed_refs = {reference for (_k, _ied, reference, _b)
+                               in self.pairs(doc)}
+            for ied in self.ieds(doc):
+                for node in _supervision_lns(doc, ied):
+                    reference = _supervised_reference(doc, node)
+                    if reference and reference not in subscribed_refs:
+                        orphans += 1
+        self.assertEqual(orphans, 0)
+
+    def test_free_slots_are_the_exception_across_the_corpus(self):
+        """**45 of 59 (IED, class) blocks hold no free slot at all**, which is
+        why `new_supervision_ln` had to be reachable from `subscribe` and why
+        its default still had to be off -- one number arguing both halves.
+
+        **8 hold exactly one**, which is the shape that makes the batch claim
+        a correctness fix rather than tidiness: two supervisions planned in
+        one call against one free slot silently lose one of the two.
+        """
+        histogram = {}
+        for name in self.FILES:
+            doc = self.corpus(name)
+            for ied in self.ieds(doc):
+                for ln_class in ("LGOS", "LSVS"):
+                    nodes = _supervision_lns(doc, ied, ln_class)
+                    if not nodes:
+                        continue
+                    free = sum(1 for node in nodes
+                               if not _supervised_reference(doc, node))
+                    histogram[free] = histogram.get(free, 0) + 1
+        self.assertEqual(histogram.get(0), 45)
+        self.assertEqual(histogram.get(1), 8)
+        self.assertEqual(sum(histogram.values()), 59)
+
+    def subscribers_in(self, doc, ied, block):
+        """Every `ExtRef` of ``ied`` bound to ``block``, by A9's definition.
+
+        **Which is wider than `serviceType` suggests, and the corpus is why
+        this is spelled out.** `QPC1_LT1_UPC1` takes `QPC1_TFE_UPC1CFG/LLN0.
+        GoSB00` through six `ExtRef` elements, and one of them names the
+        control block with `pServT="GOOSE"` and no `serviceType`, no `doName`
+        and no `daName` -- a subscription to the block rather than to an
+        attribute of it. :func:`~py61850.scl.find_control_block_subscription`
+        counts it and so does the last-`ExtRef` rule, because the input is
+        still bound to that publisher until somebody unbinds it. Counting
+        only `serviceType` inputs would blank a supervision while one
+        subscription was still standing.
+        """
+        return [ext_ref for ext_ref
+                in find_control_block_subscription(doc, block)
+                if _ied_of(doc, ext_ref) is ied]
+
+    def test_unsubscribing_all_but_one_extref_leaves_supervision_standing(self):
+        """The last-`ExtRef` rule on a real station, from both sides.
+
+        The pair chosen is the first supervised one carrying more than one
+        `ExtRef` -- 531 of the corpus's 566 are that shape, so "the last one"
+        is a question about a set almost everywhere in these files.
+        """
+        checked = 0
+        for name in self.FILES:
+            doc = self.corpus(name)
+            for (_k, ied, reference, block), _some in self.pairs(doc).items():
+                refs = self.subscribers_in(doc, ied, block)
+                if len(refs) < 2:
+                    continue
+                node = _watching(doc, ied, supervision_ln_class(block),
+                                 reference)
+                if node is None:
+                    continue
+                kept = unsubscribe(doc, refs[:-1], ignore_supervision=False)
+                self.assertEqual(
+                    [edit for edit in kept
+                     if isinstance(edit, SetTextContent)], [], name)
+                whole = unsubscribe(doc, refs, ignore_supervision=False)
+                blanks = [edit for edit in whole
+                          if isinstance(edit, SetTextContent)]
+                self.assertEqual(len(blanks), 1, name)
+                self.assertEqual(_supervised_reference(doc, node), reference)
+                doc.apply_edit(whole)
+                self.assertEqual(_supervised_reference(doc, node), "", name)
+                checked += 1
+                break
+        self.assertEqual(checked, len(self.FILES))
+
+    def test_an_unsubscribe_with_supervision_inverts_byte_for_byte(self):
+        """A5's guarantee over the whole compound edit this phase adds: the
+        unbinding and the blanking applied and undone together."""
+        for name in self.FILES:
+            doc = self.corpus(name)
+            before = doc.to_bytes()
+            for (_k, ied, reference, block), _some in self.pairs(doc).items():
+                if _watching(doc, ied, supervision_ln_class(block),
+                             reference) is None:
+                    continue
+                refs = self.subscribers_in(doc, ied, block)
+                undo = doc.apply_edit(
+                    unsubscribe(doc, refs, ignore_supervision=False))
+                self.assertNotEqual(doc.to_bytes(), before)
+                doc.apply_edit(undo)
+                self.assertEqual(doc.to_bytes(), before, name)
+                break
 
 
 if __name__ == "__main__":

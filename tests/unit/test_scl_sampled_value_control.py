@@ -39,6 +39,7 @@ from py61850.scl import (
     strip_ns,
     update_sampled_value_control,
 )
+from py61850.scl.supervision import _supervision_values
 from tests.unit import roundtrip
 from tests.unit import scl_fixtures as fx
 
@@ -61,6 +62,30 @@ def station(ied_services=None, blocks="", communication=None, ied_name="MU1"):
         communication,
         fx.ied(ied_name, ied_services + fx.access_point(
             "S1", fx.ldevice("MU", fx.ln0(body=body)))))
+
+
+def _station_with_supervision(sv_name="SV1"):
+    """`MU1` publishes a sampled-value block; `SUB` supervises it.
+
+    An `LSVS` is the rarer half of this module's material -- `mixed.scd`
+    carries all 15 in the corpus, against 585 `LGOS` -- and it is the only
+    shape that exercises what `updateSampledValueControl`'s own documentation
+    promises. `SUB` also carries a second `LSVS` watching something else, so
+    the re-point has something it must NOT follow.
+    """
+    body = (fx.dataset("PhsMeas", [fx.fcda("MU", "TCTR", "AmpSv", "MX")])
+            + fx.smv_control(sv_name, "PhsMeas", body=fx.smv_opts()))
+    return fx.scl(
+        fx.header(),
+        fx.communication(fx.subnetwork("SN", [fx.connected_ap("MU1", "S1")])),
+        fx.ied("MU1", fx.services(fx.smvsc("2")) + fx.access_point(
+            "S1", fx.ldevice("MU", fx.ln0(body=body)))),
+        fx.ied("SUB", fx.access_point("S1", fx.ldevice(
+            "CFG", fx.ln0()
+            + fx.supervision(ln_class="LSVS", inst="1",
+                             cb_ref=f"MU1MU/LLN0.{sv_name}")
+            + fx.supervision(ln_class="LSVS", inst="2",
+                             cb_ref="MU1MU/LLN0.OTHER")))))
 
 
 class _Base(unittest.TestCase):
@@ -309,16 +334,56 @@ class TestUpdate(_Base):
             with self.assertRaisesRegex(EditRejected, "required"):
                 update_sampled_value_control(doc, edit)
 
-    def test_supervision_cannot_be_turned_on(self):
-        """This is the function whose OWN documentation promises supervision
-        -- *"also updates SMV.cbName and supervision references"* -- which
-        makes refusing rather than quietly ignoring it matter more here than
-        anywhere else. A14 owns it."""
-        doc = self.doc()
+    def test_a_rename_repoints_every_supervision_naming_the_block(self):
+        """**The half `updateSampledValueControl`'s own documentation
+        promised** -- *"also updates SMV.cbName and supervision references"* --
+        which is why this function refused `False` rather than ignoring it
+        while A14 was unwritten.
+
+        The old object reference is matched EXACTLY, so the `LSVS` watching a
+        different block is left alone. A13 has to resolve an IED rename
+        through an index because a name is a prefix of many references and two
+        IEDs can build the same one; a block rename is one whole string that
+        `control_block_obj_ref` hands over before the edit applies, so that
+        index is neither reused nor duplicated here."""
+        doc = self.doc(_station_with_supervision())
+        values = [val for val, _ in _supervision_values(doc, ("SvCBRef",))]
+        self.assertEqual([(v.text or "") for v in values],
+                         ["MU1MU/LLN0.SV1", "MU1MU/LLN0.OTHER"])
+        edit = SetAttributes(_named(doc, "SampledValueControl", "SV1"),
+                             {"name": "SV9"})
+        doc.apply_edit(update_sampled_value_control(doc, edit,
+                                                   ignore_supervision=False))
+        self.assertEqual([(v.text or "") for v in values],
+                         ["MU1MU/LLN0.SV9", "MU1MU/LLN0.OTHER"])
+
+    def test_the_default_leaves_supervision_stale(self):
+        """`True` is the default and stays it -- Q32 §9 -- so a caller that
+        does not ask keeps exactly what A12 shipped. That is the cost of the
+        MINOR rule and it is recorded rather than smoothed over: the `SvCBRef`
+        is left naming a block that no longer answers to that name."""
+        doc = self.doc(_station_with_supervision())
+        values = [val for val, _ in _supervision_values(doc, ("SvCBRef",))]
+        edit = SetAttributes(_named(doc, "SampledValueControl", "SV1"),
+                             {"name": "SV9"})
+        doc.apply_edit(update_sampled_value_control(doc, edit))
+        self.assertEqual([(v.text or "") for v in values],
+                         ["MU1MU/LLN0.SV1", "MU1MU/LLN0.OTHER"])
+
+    def test_anything_but_a_rename_touches_no_supervision(self):
+        doc = self.doc(_station_with_supervision())
         edit = SetAttributes(_named(doc, "SampledValueControl", "SV1"),
                              {"desc": "x"})
-        with self.assertRaisesRegex(EditRejected, "not written yet"):
-            update_sampled_value_control(doc, edit, ignore_supervision=False)
+        self.assertEqual(
+            update_sampled_value_control(doc, edit, ignore_supervision=False),
+            [edit])
+
+    def test_a_rename_with_supervision_is_one_history_entry(self):
+        doc = self.doc(_station_with_supervision())
+        edit = SetAttributes(_named(doc, "SampledValueControl", "SV1"),
+                             {"name": "SV9"})
+        self.assertRoundTrips(doc, update_sampled_value_control(
+            doc, edit, ignore_supervision=False))
 
     def test_another_kind_of_control_block_is_refused(self):
         doc = self.doc(station(blocks=fx.gse_control("GCB1", "PhsMeas")))

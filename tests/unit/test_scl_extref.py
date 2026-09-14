@@ -493,12 +493,45 @@ class TestSubscribeIsRefused(_Base):
                 self.ext_refs[2], self.fcdas[2],
                 self.blocks["SampledValueControl"]), check_only_btype=True)
 
-    def test_supervision_cannot_be_asked_for_yet(self):
+    def test_asking_for_supervision_refuses_when_there_is_nowhere_for_it(self):
+        """**This station's subscriber holds no `LGOS` at all**, which is the
+        state of 7 of the corpus's 58 IEDs -- and of every one of the 16
+        subscriptions in it that go unsupervised, all 16 of which are on those
+        seven. A new logical node would need an `lnType` that only
+        `importLNodeType` can supply, so there is nothing this call can do.
+
+        **It refuses instead of subscribing without the supervision it was
+        asked for.** The reference appends a `null` and subscribes anyway,
+        which it can afford because its own default already writes
+        supervision; ours defaults to `True`, so `False` is an explicit
+        opt-in and an opt-in that silently does nothing cannot be found out
+        about. Q33.
+        """
+        connection = Connection(self.ext_refs[0], self.fcdas[0],
+                                self.blocks["GSEControl"])
         with self.assertRaises(EditRejected) as caught:
-            subscribe(self.doc, Connection(self.ext_refs[0], self.fcdas[0],
-                                           self.blocks["GSEControl"]),
-                      ignore_supervision=False)
-        self.assertIn("supervision", str(caught.exception))
+            subscribe(self.doc, connection, ignore_supervision=False)
+        self.assertIn("LGOS", str(caught.exception))
+        self.assertUnchanged()
+
+        # And the way out that A14 offers is a dead end for THIS shape, which
+        # the second message says plainly: there is no sibling to read an
+        # `lnType` off. Both refusals are asserted so neither can quietly
+        # start doing something.
+        with self.assertRaises(EditRejected) as caught:
+            subscribe(self.doc, connection, ignore_supervision=False,
+                      new_supervision_ln=True)
+        self.assertIn("lnType", str(caught.exception))
+        self.assertUnchanged()
+
+    def test_the_default_subscribes_without_asking_about_supervision(self):
+        """The default is `True` and stays `True`: flipping it to the
+        reference's `false` would change what every existing caller writes
+        into a file, which A18's MINOR rule forbids. Q32 §9."""
+        edits = subscribe(self.doc, Connection(
+            self.ext_refs[0], self.fcdas[0], self.blocks["GSEControl"]))
+        self.assertEqual([type(edit).__name__ for edit in edits],
+                         ["SetAttributes"])
 
     def test_a_control_block_that_is_not_one_is_refused(self):
         with self.assertRaises(EditRejected):
@@ -639,9 +672,14 @@ class TestUnsubscribe(_Base):
         with self.assertRaises(EditRejected):
             unsubscribe(self.doc, self.fcdas[0])
 
-    def test_supervision_cannot_be_asked_for_yet(self):
-        with self.assertRaises(EditRejected):
-            unsubscribe(self.doc, self.ext_refs[0], ignore_supervision=False)
+    def test_asking_for_supervision_adds_nothing_when_there_is_none(self):
+        """`False` is accepted and the edit is the same one: this station
+        holds no supervision logical node, so there is none to blank. The
+        assertion is equality rather than "nothing was raised", because the
+        second would also pass if the flag grew a fan-out by accident."""
+        self.assertEqual(
+            unsubscribe(self.doc, self.ext_refs[0], ignore_supervision=False),
+            unsubscribe(self.doc, self.ext_refs[0]))
 
 
 class TestSubscribeAndUnsubscribeAreOneEntry(_Base):

@@ -89,13 +89,18 @@ vendor strings such as `QMA1_MU1_E_S1`, so nothing here disagrees with
 ## What a rename drags along
 
 `updateSampledValueControl`'s doc names two things a `name` change triggers,
-*"also updates SMV.cbName and supervision references"*, and this phase does
-the first and refuses the second. Supervision is A14's: the corpus holds 15
-`LSVS` logical nodes waiting for it, and `ignore_supervision=False` is refused
-rather than quietly ignored, exactly as in the seven functions that carry it.
-:mod:`py61850.scl.supervision` now builds the edits; wiring them to these
-seven is the half of that phase that changes merged behaviour, and it is
-deliberately separate.
+*"also updates SMV.cbName and supervision references"*. A12 did the first and
+refused the second; **A14b does both**, and this is the one function whose own
+documentation promised supervision, which is why it mattered more here than
+anywhere else that the refusal was honest while it lasted.
+
+With `ignore_supervision=False`, every `SvCBRef` naming the block is
+re-pointed at its new name. The old reference is matched **exactly** --
+:func:`~py61850.scl.control_block_obj_ref` hands it over before the edit
+applies -- rather than decomposed the way A13's IED rename has to decompose
+one, because a block rename changes one whole string and an IED rename changes
+a prefix that two IEDs could share. So `ied.py`'s object-reference index is
+neither reused nor duplicated here: it answers a question this does not ask.
 
 It also re-points subscribers, which the reference documents for neither
 update function -- `mixed.scd` holds 256 `ExtRef` elements with
@@ -293,18 +298,17 @@ def update_sampled_value_control(doc, edit, ignore_supervision=True) -> List:
        :func:`~py61850.scl.control_block_gse_or_smv`;
     4. `srcCBName` re-pointed on every `ExtRef` subscribed to the block.
 
-    ``ignore_supervision=False`` is refused: supervision is A14's, and this is
-    the function whose own documentation promises it, which makes saying so
-    more important here than anywhere else.
+    ``ignore_supervision=False`` adds a fifth: **every `SvCBRef` naming this
+    block, re-pointed**, when `name` changes. That is the half of *"also
+    updates SMV.cbName and supervision references"* A12 could not write, and
+    the reason this function refused `False` rather than ignoring it. Like
+    step 3 it fires only on a real rename; the value is re-texted in place, so
+    an `LSVS` keeps its own attributes and its position.
 
     Raises :class:`~py61850.scl.EditRejected` if ``edit`` is not a
     `SetAttributes` on a `SampledValueControl`, if it would clear a required
     attribute, or if the new name is already used in the logical node.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if not isinstance(edit, SetAttributes):
         raise EditRejected(
             "update_sampled_value_control takes a SetAttributes, not "
@@ -328,9 +332,16 @@ def update_sampled_value_control(doc, edit, ignore_supervision=True) -> List:
     # subscriber edits, so it runs before anything is appended.
     subscribers = _rename_edits(doc, control, edit)
     wanted = edit.attributes.get("name")
+    supervision: List = []
     if "name" in edit.attributes and not _same(wanted, control.get("name")):
         address = control_block_gse_or_smv(doc, control)
         if address is not None:
             edits.append(SetAttributes(address, {"cbName": wanted}))
+        if not ignore_supervision:
+            # Deferred: `supervision` reaches A9 and A8 at module level and
+            # nothing here, so this is the only edge back. Q25's shape.
+            from .supervision import _repoint_supervision
+            supervision = _repoint_supervision(doc, control, wanted)
     edits.extend(subscribers)
+    edits.extend(supervision)
     return edits
