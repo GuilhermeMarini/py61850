@@ -87,7 +87,7 @@ plausibly belongs in a guard and is knowingly absent from ours.
   812 of the corpus's 852 blocks omit it, 40 write `"false"` and **not one
   writes `"true"`**. Writing the default in to make it explicit would be this
   library changing bytes nobody asked it to change.
-- **`confRev` starts at 1.** A9 measured that 1,014 of the corpus's 1,015
+- **`confRev` starts at 1.** A9 measured that 1,013 of the corpus's 1,014
   control blocks carry a revision congruent to 1 modulo
   :data:`~py61850.scl.CONF_REV_STEP`; 1 is where that sequence begins, and a
   new block joins it at the start rather than one step in.

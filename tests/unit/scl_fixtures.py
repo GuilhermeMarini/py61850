@@ -283,7 +283,7 @@ def _dat_set(dat_set):
     """` datSet="X"`, or nothing at all when `dat_set` is None.
 
     **Omitting it is not a degenerate case.** 720 of the reference corpus's
-    1,015 control blocks -- the majority of every report control block in it
+    1,014 control blocks -- the majority of every report control block in it
     -- carry no `datSet`: they are unconfigured RCB templates a vendor ships
     in the ICD, and they are what a capability meets most often.
     """
@@ -406,3 +406,86 @@ def ext_ref(**attrs):
 
 def inputs(*refs):
     return "<Inputs>" + "".join(refs) + "</Inputs>"
+
+
+# -- the four `iedName` carriers no corpus file contains ---------------------
+#
+# `LNode`, `ClientLN`, `KDC` and `Association` are ZERO in all three reference
+# exports, and they are four of the six elements A13's rename has to follow.
+# So they are built here, from the schema rather than from a file, and the
+# docstrings say which part of it -- a fixture invented out of nothing is how
+# a reader acquires confident wrong answers, and saying where each shape came
+# from is the cheapest guard against it.
+
+def lnode(ied_name=None, ln_class="CSWI", ld_inst="", prefix="", ln_inst="1",
+          ln_type=None):
+    """An `<LNode>`: a Substation-section reference to a logical node that a
+    device is expected to provide.
+
+    `tLNode@iedName` is ``use="optional" default="None"`` and typed
+    `tIEDNameOrNone`, so **omitting it and writing `None` mean the same
+    thing** -- which is exactly why a removal writes the four-character string
+    rather than deleting the attribute. `lnClass` is the one required
+    attribute.
+    """
+    attrs = f' lnClass="{ln_class}"'
+    if ied_name is not None:
+        attrs = f' iedName="{ied_name}"' + attrs
+    attrs += f' ldInst="{ld_inst}" prefix="{prefix}" lnInst="{ln_inst}"'
+    if ln_type is not None:
+        attrs += f' lnType="{ln_type}"'
+    return f"<LNode{attrs}/>"
+
+
+def client_ln(ied_name, ap_ref="S1", ld_inst="LD0", prefix="", ln_class="IHMI",
+              ln_inst="1"):
+    """A `<ClientLN>`: who receives a report. It goes inside `RptEnabled`,
+    inside a `ReportControl`. `tClientLN` extends the `agLNRef` attribute
+    group, which is where its required `iedName` comes from."""
+    return (f'<ClientLN iedName="{ied_name}" apRef="{ap_ref}" '
+            f'ldInst="{ld_inst}" prefix="{prefix}" lnClass="{ln_class}" '
+            f'lnInst="{ln_inst}"/>')
+
+
+def kdc(ied_name, ap_name="S1"):
+    """A `<KDC>`: the key distribution centre an IED uses, named as another
+    IED's access point. `tKDC` is two required attributes and no content, and
+    it is a child of `IED` -- so one inside the IED being removed goes with
+    the subtree and one in a different IED does not."""
+    return f'<KDC iedName="{ied_name}" apName="{ap_name}"/>'
+
+
+def association(ied_name, ap_ref="S1", ld_inst="LD0", prefix="",
+                ln_class="IHMI", ln_inst="1", kind="pre-established"):
+    """An `<Association>`: a two-party application association, declared under
+    a `Server`. Like `ClientLN` it extends `agLNRef`, and `associationID` is
+    optional where `kind` is required."""
+    return (f'<Association kind="{kind}" iedName="{ied_name}" '
+            f'apRef="{ap_ref}" ldInst="{ld_inst}" prefix="{prefix}" '
+            f'lnClass="{ln_class}" lnInst="{ln_inst}"/>')
+
+
+def rpt_enabled_with(clients, max_="1"):
+    """A `<RptEnabled>` holding `ClientLN` children."""
+    return f'<RptEnabled max="{max_}">' + "".join(clients) + "</RptEnabled>"
+
+
+def supervision(ln_class="LGOS", inst="1", prefix="", cb_ref=None,
+                dat_set=None, go_id=None):
+    """An `LGOS` or `LSVS`, in the shape the reference corpus writes one.
+
+    ``cb_ref=None`` produces the IDLE shape -- ``<Val />`` with no text --
+    which is not invented: `sel.scd` carries **24** `LGOS` written exactly
+    that way, for a supervision node that is allocated and not yet pointed at
+    anything. That is the shape a removal blanks back to.
+
+    `go_id` is written beside the two references and is what a rename must
+    NOT touch: all 191 in the corpus are equal to a real `GSEControl@appID`.
+    """
+    ref_do = "SvCBRef" if ln_class == "LSVS" else "GoCBRef"
+    body = doi(ref_do, dai("setSrcRef", val=cb_ref if cb_ref is not None else ""))
+    body += doi("DatSet", dai("setSrcRef", val=dat_set if dat_set is not None else ""))
+    if go_id is not None:
+        body += doi("GoID", dai("setVal", val=go_id))
+    return ln(ln_class, inst=inst, prefix=prefix, ln_type=f"T_{ln_class}",
+              body=body)

@@ -232,6 +232,113 @@ def parent_of(doc, element: ET.Element) -> Optional[ET.Element]:
     return None if p is _MISSING else p
 
 
+# -- the lazy caches --------------------------------------------------------
+#
+# `SclDocument` builds `.templates`, `.communication`, `.ied_headers` and each
+# `ied(name)` on first use and keeps them, and until A13 an edit left them all
+# standing. That was tolerable while the edit layer only changed attributes;
+# it stopped being tolerable when `remove_ied` began removing the very element
+# `doc.ied(name)` wraps. See Q14.
+#
+# **The rule is by ancestry, and it invalidates on every edit kind.** The
+# tempting narrower rule -- that only `Insert` and `Remove` can invalidate,
+# since a `SetAttributes` leaves the tree's shape alone -- is wrong here, and
+# the models say so in their own docstrings: every one of them SNAPSHOTS. An
+# `IedHeader` copies `name`, `type` and `desc` off the element in its
+# constructor; an `Address` copies each `P`'s text; `ExtRef.__init__` copies
+# all twelve binding attributes and records that "a list obtained before an
+# edit reports what the file said before it". So an attribute edit makes a
+# cached model stale in value even though the element is still where it was.
+#
+# What that costs is worth stating plainly rather than discovering later:
+# **this does not make the editing loop cheap, it makes it correct.** Q14
+# measured re-warming one `Ied` on a 22 MB export at 41 ms against 3 ms warm,
+# and an ancestry rule still pays that on every edit inside the IED being
+# worked on. What it avoids is the rest -- the other 57 IEDs of a station stay
+# warm while one is edited, which clearing the whole cache would not give. The
+# 14x is inherent to a read model that snapshots, not to the invalidation
+# strategy, and closing it for real means making the model read through to the
+# element. That is a `model.py` question and it is recorded as one.
+
+_SECTION_CACHES = {
+    "DataTypeTemplates": ("templates",),
+    "Communication": ("communication",),
+}
+
+
+def _local(tag) -> str:
+    # `strip_ns` lives in `document`, which imports this module; one line is
+    # cheaper than the import cycle it would take to share it.
+    return tag[tag.index("}") + 1:] if tag.startswith("{") else tag
+
+
+def _section_of(doc, element):
+    """The child of the root that contains ``element``, or ``element`` itself
+    if it is one.
+
+    ``None`` when ``element`` is the root, or is not in this document -- both
+    of which mean "nothing narrower than the whole cache can be trusted".
+    """
+    node = element
+    while True:
+        parent = _parent(doc, node, rebuild=False)
+        if parent is doc.root:
+            return node
+        if parent is None or parent is _MISSING:
+            return None
+        node = parent
+
+
+def _keys_for(section):
+    """The cache keys a change inside ``section`` invalidates.
+
+    ``None`` means all of them; ``()`` means none -- which is the answer for
+    the `Substation`, `Line` and `Process` sections, nothing in which is
+    cached.
+    """
+    if section is None:
+        return None
+    tag = section.tag
+    if not isinstance(tag, str):        # a comment at the top level
+        return ()
+    local = _local(tag)
+    if local == "IED":
+        # `ied_elements` and `ied_headers` are keyed by name and snapshot the
+        # IED's own attributes, so both go whenever anything in an IED moves.
+        # Rebuilding them is part of Q14's "~1 ms, all four"; the 41 ms one is
+        # the `ied:` entry, and only this IED's is dropped.
+        return ("ied_elements", "ied_headers", "ied:" + str(section.get("name")))
+    return _SECTION_CACHES.get(local, ())
+
+
+def _stale_keys(doc, parent, child):
+    """The keys invalidated by a change to ``parent``'s children.
+
+    ``child`` is used when ``parent`` is the root, because the section is then
+    the child itself -- and a freshly created one is not in the parent map for
+    :func:`_section_of` to walk up from.
+    """
+    return _keys_for(child if parent is doc.root else _section_of(doc, parent))
+
+
+def _both(first, second):
+    if first is None or second is None:
+        return None
+    return tuple(dict.fromkeys(first + second))
+
+
+def _drop(doc, keys) -> None:
+    """Forget the cache entries ``keys`` names. The parent map is not one of
+    them: it is maintained by this module rather than rebuilt by it."""
+    cache = doc._cache
+    if keys is None:
+        for key in [k for k in cache if k != "parents"]:
+            del cache[key]
+        return
+    for key in keys:
+        cache.pop(key, None)
+
+
 def _index(parent: ET.Element, child: ET.Element) -> int:
     # By identity. `list.index` would compare with `==`, which on `Element`
     # IS identity today -- but that is a default nobody promised, and two
@@ -388,7 +495,11 @@ def _insert(doc, edit: Insert) -> Edit:
 
     former = _parent(doc, node, rebuild=False)
     moving = former is not _MISSING and former is not None
+    # Read BEFORE the tree moves: a move empties one place and fills another,
+    # and both sections lose whatever was cached about them.
+    stale = _stale_keys(doc, parent, node)
     if moving:
+        stale = _both(stale, _stale_keys(doc, former, node))
         inverse: Edit = Insert(former, node, _next_sibling(former, node))
         former.remove(node)
     else:
@@ -407,6 +518,7 @@ def _insert(doc, edit: Insert) -> Edit:
         for el in node.iter():
             for child in el:
                 m[child] = el
+    _drop(doc, stale)
     return inverse
 
 
@@ -418,6 +530,7 @@ def _remove(doc, edit: Remove) -> Edit:
     if parent is None:
         raise EditRejected("the root element cannot be removed")
 
+    stale = _stale_keys(doc, parent, node)
     inverse = Insert(parent, node, _next_sibling(parent, node))
     parent.remove(node)
 
@@ -426,6 +539,7 @@ def _remove(doc, edit: Remove) -> Edit:
     for el in node.iter():
         for child in el:
             m.pop(child, None)
+    _drop(doc, stale)
     return inverse
 
 
@@ -434,6 +548,9 @@ def _set_attributes(doc, edit: SetAttributes) -> Edit:
     if _parent(doc, element) is _MISSING:
         raise EditRejected("the element is not in this document")
 
+    # BEFORE the mutation, because the key an `Ied` is cached under is the
+    # IED's `name` and this is the edit that changes it.
+    stale = _keys_for(_section_of(doc, element))
     attrib = element.attrib
     wanted = edit.attributes
     adds = [k for k, v in wanted.items() if v is not None and k not in attrib]
@@ -470,6 +587,7 @@ def _set_attributes(doc, edit: SetAttributes) -> Edit:
                 attrib.pop(name, None)
             else:
                 attrib[name] = value
+    _drop(doc, stale)
     return SetAttributes(element, previous)
 
 
@@ -477,6 +595,8 @@ def _set_text(doc, edit: SetTextContent) -> Edit:
     element = edit.element
     if _parent(doc, element) is _MISSING:
         raise EditRejected("the element is not in this document")
+    stale = _keys_for(_section_of(doc, element))
     inverse = SetTextContent(element, element.text)
     element.text = edit.text
+    _drop(doc, stale)
     return inverse

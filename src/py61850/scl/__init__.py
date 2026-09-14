@@ -143,6 +143,14 @@ from .document import (
     privates_of,
     strip_ns,
 )
+from .ied import (
+    IED_NAME_ELEMENTS,
+    ORPHAN_IED_NAME,
+    SUPERVISION_LN_CLASSES,
+    SUPERVISION_REFERENCE_DOS,
+    remove_ied,
+    update_ied,
+)
 from .extref import (
     Connection,
     TypeRestriction,
@@ -212,4 +220,6 @@ __all__ = [
     "update_sampled_value_control",
     "create_gse", "create_smv", "change_gse_content",
     "change_smv_content", "change_gse_or_smv_address", "connected_ap_for",
+    "update_ied", "remove_ied", "IED_NAME_ELEMENTS", "ORPHAN_IED_NAME",
+    "SUPERVISION_LN_CLASSES", "SUPERVISION_REFERENCE_DOS",
 ]

@@ -284,7 +284,7 @@ def update_sampled_value_control(doc, edit, ignore_supervision=True) -> List:
        reference's own note says *"confRev attribute is updated +10000 on each
        data set change"*, which is
        :data:`~py61850.scl.CONF_REV_STEP` arrived at independently: A9
-       derived the step from 1,014 corpus values before that sentence was
+       derived the step from 1,013 corpus values before that sentence was
        read;
     3. `SMV@cbName` followed, when `name` changes -- the reference's first
        documented fan-out, found through A9's

@@ -316,7 +316,7 @@ class TestUpdatedConfRev(unittest.TestCase):
 
     def test_it_continues_a_vendor_encoded_sequence(self):
         """`850001` is not an opaque vendor number -- it is `1 + 85 x 10000`,
-        and every one of the 1,014 corpus values congruent to 1 modulo 10,000
+        and every one of the 1,013 corpus values congruent to 1 modulo 10,000
         was produced this way. A step of 1 would be indistinguishable from
         them; this one continues the sequence the file is already writing."""
         self.assertEqual(updated_conf_rev(ET.Element("X", {"confRev": "850001"})),
@@ -739,7 +739,7 @@ class TestTheCorpusAgrees(unittest.TestCase):
         self.assertEqual(doc.to_bytes(), original)
 
     def test_the_revision_step_continues_what_the_file_wrote(self):
-        """1,014 of the corpus's 1,015 control blocks carry a `confRev`
+        """1,013 of the corpus's 1,014 control blocks carry a `confRev`
         congruent to 1 modulo 10,000. That is not a coincidence about vendors;
         it is this rule, already applied -- up to 189 times on one block."""
         doc = self.corpus("mixed.scd")
