@@ -5,13 +5,18 @@
 # General Public License v3 or later; see LICENSE. A commercial licence,
 # for use in software you do not wish to release under the AGPL, is
 # available from the copyright holder -- see COMMERCIAL.md.
-"""Renaming an IED, and removing one: the referential repair either implies.
+"""Bringing an IED in, renaming one, removing one: the referential repair each implies.
 
-    from py61850.scl import Remove, SclDocument, SetAttributes, remove_ied, update_ied
+    from py61850.scl import (Remove, SclDocument, SetAttributes, insert_ied,
+                             remove_ied, update_ied)
 
     doc = SclDocument.parse("station.scd")
     doc.apply_edit(update_ied(doc, SetAttributes(ied, {"name": "REL_2"})))
     doc.apply_edit(remove_ied(doc, Remove(ied)))
+
+    relay = SclDocument.parse("new_relay.icd")
+    doc.apply_edit(insert_ied(doc, relay, ["REL_3"], on_conflict="rename",
+                              add_communication=True))
 
 **An IED's name is not stored once.** It is written on the `IED` element and
 then repeated, in this document, everywhere anything refers to the device --
@@ -21,24 +26,65 @@ concatenated into supervision setting values. Renaming the `IED` element alone
 produces a file that is structurally valid and semantically ruined: every one
 of those references now names a device that is not in it.
 
-**So both functions here are edit checks** in the reference's sense -- the
-caller's own edit goes in and the corrected, expanded one comes back, input
+**`update_ied` and `remove_ied` are edit checks** in the reference's sense --
+the caller's own edit goes in and the corrected, expanded one comes back, input
 edit first, as Q23 settled for the whole of A9 onward:
 
     edits = update_ied(doc, SetAttributes(ied, {"name": "REL_2"}))
     undo = doc.apply_edit(edits)      # one history entry, 4,000 primitives
 
+**`insert_ied` is not an edit check**, because there is no caller edit to
+check: nothing in the target is being changed, so the caller has nothing to
+propose. It builds the whole edit itself, as
+:func:`~py61850.scl.import_lnode_types` does, and for the same reason.
+
 **Nothing here applies anything**, and a refusal raises
 :class:`~py61850.scl.EditRejected` with nothing half-done.
 
-**`insert_ied` is deliberately not here.** The reference's `insertIed` is
-documented as importing an IED *"with its `DataTypeTemplates`"*, and merging
-`LNodeType`, `DOType`, `DAType` and `EnumType` into a target document with
-conflict resolution is `importLNodeType` -- a different phase's capability,
-which does not exist yet. Corpus IEDs carry 203 to 287 `LNodeType` between
-them. Writing the import without the merge would produce an IED whose types
-are not in the file; writing the merge here would be that phase under this
-one's name. See Q31.
+## What an import brings, and the two halves it is made of
+
+The reference documents `insertIed` as importing an IED *"with its
+`DataTypeTemplates`"* and, optionally, *"linked `Communication` section
+elements"*. Both halves are real and neither is small:
+
+- **the types.** Corpus IEDs use **6 to 110 `LNodeType` each** -- measured per
+  device across all 58, which is not the 203-to-287 figure Q31 and A13's note
+  carry: that is the size of each FILE's pool, and no single IED uses one
+  whole. Each drags a closure of `DOType`, `DAType` and `EnumType` behind it,
+  319 templates in all for the single Siemens device Q34 worked through. That merge, with its
+  conflict policy, is :func:`~py61850.scl.import_lnode_types`, and **this
+  function is the caller that list was designed for.** It is also why
+  `insert_ied` was not written with `update_ied` and `remove_ied`: A13 could
+  not import an IED whose types nothing could merge, and writing the merge
+  there would have been A15 under A13's name. Q31 §6, Q34 §9.
+- **the access points.** 79 `ConnectedAP` across the three exports, and a
+  device is not one of them: `mixed.scd` puts 12 of its 14 IEDs in two
+  `SubNetwork`s and `sel.scd` puts `RTAC_1` in ten.
+  :func:`_communication_edits` has what is copied and what is not.
+
+**A list of names, not one**, which is where this diverges from the
+reference's single-IED call. The argument is A15's, one level up: two IEDs
+from one file share their types heavily -- `siemens.scd`'s `QPC2_TR1_AL11` and
+`QPC2_TR1_AL12` share **all 82** of theirs, and 908 of that file's 1,111
+``(IED, lnType)`` pairs are re-uses -- so two calls would each plan against a
+target that does not yet hold what the other is inserting. One call over a
+list has no previous call to be stale against.
+
+**Two things are refused rather than guessed, and both keep this module
+consistent with itself.** A name the target already holds is refused, because
+:func:`update_ied` refuses the same collision and because a device name is the
+engineer's rather than an allocator's. A conflicting data type is refused by
+:func:`~py61850.scl.import_lnode_types`'s own default, which is passed
+straight through rather than re-decided here.
+
+**One thing is re-pointed and one thing is deliberately not.** `LN@lnType` and
+`LN0@lnType` inside the copy are rewritten to the ids the types actually enter
+the target under -- without it ``on_conflict="rename"`` re-types 114 of
+`QPC2_TR1_AL11`'s 175 logical nodes silently. `ExtRef@iedName` is left exactly
+as the source wrote it, because **4,291 of the corpus's 4,291 `ExtRef@iedName`
+values name an IED of their own file**: a binding that dangles after an import
+dangles only because the rest of the source was left behind, and the next name
+in the list may be what resolves it.
 
 ## What carries an IED's name, and how this module finds each one
 
@@ -232,14 +278,17 @@ invalidates by ancestry, and the reasoning is in Q14 and in `edit.py`.
 
 from __future__ import annotations
 
+import copy
 from typing import Dict, List, Optional
 from xml.etree import ElementTree as ET
 
 from .control_block import _logical_node, _placement
 from .controls import CONTROL_BLOCK_TAGS
+from .data_types import _root_of, import_lnode_types, lnode_type_conflicts
 from .document import strip_ns
-from .edit import EditRejected, Remove, SetAttributes, SetTextContent
+from .edit import EditRejected, Insert, Remove, SetAttributes, SetTextContent
 from .extref import unsubscribe
+from .ordering import reference_for
 from .supervision import (
     SUPERVISION_LN_CLASSES,
     SUPERVISION_REFERENCE_DOS,
@@ -552,4 +601,331 @@ def remove_ied(doc, edit) -> List:
         if not text or index.get(text) != name or val in inside:
             continue
         edits.append(SetTextContent(val, None))
+    return edits
+
+
+# -- inserting --------------------------------------------------------------
+
+def _communication(doc):
+    """The `Communication` section, or ``None``.
+
+    Direct child of the root and namespace-exact, for the reason
+    :func:`_ied_elements` gives: a section-named element nested in a vendor
+    `Private` is not this document's `Communication`.
+    """
+    tag = _qualified(doc, "Communication")
+    return next((child for child in doc.root if child.tag == tag), None)
+
+
+def _subnetworks(doc):
+    """Every `SubNetwork`, as a direct child of a direct-child `Communication`.
+
+    Two levels of direct-child rather than one :func:`_own` scan, so a
+    `SubNetwork` a vendor writes inside its own `Private` block is left where
+    it is.
+    """
+    section = _communication(doc)
+    if section is None:
+        return []
+    tag = _qualified(doc, "SubNetwork")
+    return [child for child in section if child.tag == tag]
+
+
+def _ln_type_ids(doc, ied) -> List[str]:
+    """The `LNodeType` ids the `LN` and `LN0` elements inside ``ied`` name, in
+    document order and without repeats.
+
+    **`LN` and `LN0` are the whole list, and the third `lnType` carrier is not
+    a mistake to have left out.** :data:`~py61850.scl.data_types._LN_TYPE_ELEMENTS`
+    adds `LNode`, because a removal has to know a type is in use and an `LNode`
+    puts it in use -- but `LNode` lives in `Substation`, which is outside every
+    `IED`, so no IED subtree contains one.
+
+    Nothing else inside an IED names a data type. Measured over the corpus
+    IED that Q34 worked through, `QPC2_TR1_AL11`: of the attributes that look
+    like references, 175 are `LN`/`LN0` `lnType`; 229 are ``Private@type``,
+    which is a vendor's own vocabulary and not a template id; 7 are `datSet`
+    values naming a dataset INSIDE the same IED, which the subtree copy carries
+    with it; and `IED@type` and `GSEControl@type` are free-form strings the
+    schema does not resolve against anything.
+    """
+    wanted = (_qualified(doc, "LN"), _qualified(doc, "LN0"))
+    out: List[str] = []
+    seen = set()
+    for element in ied.iter():
+        if element.tag not in wanted:
+            continue
+        id_ = element.get("lnType")
+        if id_ and id_ not in seen:
+            seen.add(id_)
+            out.append(id_)
+    return out
+
+
+def _repoint_ln_type(doc, node, mapping) -> None:
+    """Rewrite a COPIED IED's `lnType` values to the ids they carry in the
+    target.
+
+    **Without this, ``on_conflict="rename"`` silently re-types most of the
+    device.** Importing `QPC2_TR1_AL11` from `siemens.scd` into `mixed.scd`
+    meets 40 conflicting `LNodeType` ids out of the 82 the IED uses, and those
+    40 enter the target under fresh ids -- so **114 of the IED's 175 `LN`/`LN0`
+    elements would be left naming the TARGET's own, different type**. That is
+    Q34 §4's defect one level up: a copied structure re-pointed at something it
+    does not mean.
+
+    Applied to the copy before it is inserted, never to the source's own
+    element, exactly as :func:`~py61850.scl.data_types._repoint` is: the source
+    document is read-only to this module and the caller may well go on using
+    it. An id the mapping does not carry is left alone -- under ``"refuse"``
+    the import never gets this far, and under the other two policies every
+    type in the closure is mapped.
+    """
+    wanted = (_qualified(doc, "LN"), _qualified(doc, "LN0"))
+    for element in node.iter():
+        if element.tag not in wanted:
+            continue
+        id_ = element.get("lnType")
+        if not id_:
+            continue
+        fresh = mapping.get(("LNodeType", id_))
+        if fresh is not None and fresh != id_:
+            element.set("lnType", fresh)
+
+
+def _communication_edits(doc, source, names) -> List:
+    """The `ConnectedAP` subtrees of ``names``, copied into ``doc``.
+
+    **A device is not one access point.** `mixed.scd` puts 12 of its 14 IEDs
+    in TWO `SubNetwork`s and `sel.scd` puts `RTAC_1` in ten, so what is copied
+    is every `ConnectedAP` the source names the IED in, each into the
+    `SubNetwork` that held it. All 79 corpus access points carry an `apName`
+    that is a real `AccessPoint` of their IED, so the copy needs no repair.
+
+    A target `SubNetwork` of the same name receives the copy. **One that does
+    not exist is CREATED, carrying `name` and `type` and no children**, and
+    that is the ordinary case rather than the edge: the three exports share
+    **not one `SubNetwork` name between them** in any of the six ordered pairs
+    -- `W01`/`Subnet1`/`Architect`/`S01`-`S10` against `PROCESS BUS 1`/`2`/
+    `STATION BUS` against `Default_subnet`. Refusing instead would make
+    ``add_communication=True`` fail on every pair of real files there is.
+
+    **The source `SubNetwork`'s own children are deliberately not copied** --
+    `sel.scd`'s carry a `Text` and a `BitRate`, `mixed.scd`'s four `Private`
+    and `siemens.scd`'s one. Those describe the SOURCE's network, and a
+    `Private` is the vendor bookkeeping `sellib` and `siemenslib` read; moving
+    one vendor's private block into another vendor's station is not a copy of
+    an access point.
+
+    **A `SubNetwork` the target already has is used exactly as it stands**,
+    `type` included. Rewriting `SubNetwork@type` to match the source would
+    re-type every other `ConnectedAP` already in it, which is a far larger
+    edit than the one asked for. No corpus pair shares a name, so this never
+    fires on available material and is recorded for that reason.
+    """
+    wanted = set(names)
+    target_root = doc.root
+    ap_tag = _qualified(source, "ConnectedAP")
+
+    edits: List = []
+    section = _communication(doc)
+    if section is None:
+        # A target with no Communication at all is ordinary -- an SSD
+        # describing a substation and no devices is the shape -- and the
+        # section has to be in the tree before a SubNetwork goes in it.
+        section = ET.Element(_qualified(doc, "Communication"))
+        edits.append(Insert(target_root, section,
+                            reference_for(target_root, section.tag)))
+
+    have = {subnet.get("name"): subnet for subnet in _subnetworks(doc)}
+    taken = {(ap.get("iedName"), ap.get("apName"))
+             for subnet in _subnetworks(doc) for ap in subnet
+             if ap.tag == _qualified(doc, "ConnectedAP")}
+    created: Dict[Optional[str], ET.Element] = {}
+
+    for subnet in _subnetworks(source):
+        for ap in subnet:
+            if ap.tag != ap_tag or ap.get("iedName") not in wanted:
+                continue
+            key = (ap.get("iedName"), ap.get("apName"))
+            if key in taken:
+                # The target already describes this access point, which means
+                # it holds a ConnectedAP naming a device it does not have --
+                # the IED name itself was refused above if it did. Adding a
+                # second one for the same apName would make the document say
+                # two things. No corpus file contains an orphan ConnectedAP:
+                # all 79 name an IED that is present.
+                raise EditRejected(
+                    f"the target already holds a ConnectedAP for iedName="
+                    f"{key[0]!r} apName={key[1]!r}; it names a device the "
+                    f"target does not have, and this import would give that "
+                    f"access point a second description")
+            name = subnet.get("name")
+            # `is None`, never truthiness: an `Element` with no children is
+            # FALSY in ElementTree, so `have.get(name) or created.get(name)`
+            # throws away a target SubNetwork that exists and happens to be
+            # empty and builds a second one beside it. Invisible on the
+            # corpus -- all 17 of its SubNetworks already hold access points
+            # -- and caught by counting the result on a built fixture.
+            into = have.get(name)
+            if into is None:
+                into = created.get(name)
+            if into is None:
+                into = ET.Element(_qualified(doc, "SubNetwork"))
+                if name is not None:
+                    into.set("name", name)
+                if subnet.get("type") is not None:
+                    into.set("type", subnet.get("type"))
+                created[name] = into
+                edits.append(Insert(section, into,
+                                    reference_for(section, into.tag)))
+            node = copy.deepcopy(ap)
+            edits.append(Insert(into, node, reference_for(into, node.tag)))
+    return edits
+
+
+def insert_ied(doc, source, names, on_conflict="refuse",
+               add_communication=False) -> List:
+    """The edit that brings ``names`` from ``source`` into ``doc``.
+
+    ``doc`` is the target :class:`~py61850.scl.SclDocument` and ``source`` is
+    the one to read from -- **a document, not an element**, for the reason
+    :func:`~py61850.scl.import_lnode_types` records: the `DataTypeTemplates`
+    closure lives in ITS section and an `ElementTree` element carries no owner
+    document. `doc` first, by Q23.
+
+    ``names`` is a **sequence** of IED names, and that is the first divergence
+    from the reference, which imports one device per call. It is forced by the
+    same measurement that made A15 take a list: `siemens.scd`'s
+    `QPC2_TR1_AL11` and `QPC2_TR1_AL12` share **all 82** of their `LNodeType`
+    ids, and 908 of that file's 1,111 ``(IED, lnType)`` pairs are re-uses
+    across devices. Two IEDs as two calls would each plan against a target
+    that does not yet hold what the other is inserting, and each emit an
+    `Insert` for the same 82 types -- Q33 §9's hazard, met for the third time.
+
+    ``on_conflict`` is passed through to
+    :func:`~py61850.scl.import_lnode_types` unchanged: ``"refuse"`` (the
+    default), ``"rename"`` or ``"overwrite"``. A caller wanting to see what
+    will collide before asking has
+    :func:`~py61850.scl.lnode_type_conflicts`, which is the same computation
+    this builds from.
+
+    ``add_communication`` copies each IED's `ConnectedAP` subtrees into the
+    target's `Communication`, creating any `SubNetwork` the target lacks. It
+    is **off by default**, matching the reference -- whose `InsertIedOptions`
+    is an optional argument -- and this package's habit of asking for the
+    larger action rather than arriving at it.
+
+    What comes back, in this order:
+
+    1. the `Communication` edits, when ``add_communication`` is set;
+    2. an :class:`~py61850.scl.Insert` of a deep COPY of each IED, its
+       `lnType` values re-pointed;
+    3. the `DataTypeTemplates` edits for the closure the IEDs need.
+
+    **That order is A7's, not taste.** `Communication`, `IED` and
+    `DataTypeTemplates` are in that sequence in the SCL content model, and a
+    target missing two of the three resolves both insertion references to
+    "append" -- so building them in any other order would put `Communication`
+    after the IED it describes. Where all three sections already exist every
+    reference is an element that was there before the call and the order does
+    not matter.
+
+    **Every node inserted is a deep copy.** The reference is emphatic that its
+    own elements are *moved*, because a browser has `importNode` and its source
+    is a throwaway parse of an upload; `ElementTree` has neither, and A5's
+    `Insert` says a node from another document cannot even be detected and must
+    not be handed over. Q31 §6 took this decision before A15 existed and A15
+    implemented it for the types.
+
+    **Nothing this IED's `ExtRef` elements name is re-pointed, and the corpus
+    is why.** An imported device brings bindings naming other devices, and
+    after an import some of them name nothing in the target. Leaving them is
+    not an oversight: **4,291 of the corpus's 4,291 `ExtRef@iedName` values
+    name an IED of their own file**, so a reference that dangles after an
+    import dangles only because the rest of the source was left behind.
+    `QPC2_TR1_AL11`'s 28 bindings name seven devices and all seven are in
+    `siemens.scd` -- six of them siblings a list import brings in the same
+    call. Blanking them would destroy a subscription the next name in the list
+    makes valid, and an engineer's binding is information, not litter. The
+    reference re-points nothing either; it returns `Insert[]` only.
+
+    Raises :class:`~py61850.scl.EditRejected` if ``source`` carries no IED of
+    one of these names, if a name is given twice, if the target already holds
+    an IED of that name, and for anything
+    :func:`~py61850.scl.lnode_type_conflicts` refuses -- a conflicting type
+    under the default policy, a source whose closure is not closed, or a
+    namespace mismatch.
+
+    **A name the target already holds is REFUSED rather than renamed**, which
+    is the second divergence: the reference checks nothing. Three reasons, and
+    the last is the one that decides it. :func:`update_ied` refuses a rename
+    that collides and two functions in one module cannot answer the same
+    collision differently. Renaming would need an allocator, and allocation
+    policy is A17's by name -- Q34 §3 already conceded `_fresh_id` as a
+    placeholder to be replaced there rather than competed with. And **an IED
+    name is not a type id**: a type id is bookkeeping nothing outside the file
+    knows, while a device name is on the relay, in the RDB and on the panel
+    door. Inventing one for the engineer is exactly the silent choice
+    ``on_conflict`` exists to prevent. The caller's remedy is one call they
+    already have -- insert, then :func:`update_ied`.
+    """
+    if isinstance(names, str):
+        raise EditRejected(
+            "names is a sequence of IED names; a bare string would be read "
+            "one character at a time")
+    target_root = _root_of(doc)
+    _root_of(source)
+    names = list(names)
+
+    seen = set()
+    for name in names:
+        if name in seen:
+            raise EditRejected(
+                f"IED {name!r} is named twice in the same import; the second "
+                f"copy would collide with the first")
+        seen.add(name)
+
+    present = {element.get("name") for element in _ied_elements(doc)}
+    incoming = []
+    for name in names:
+        element = next((candidate for candidate in _ied_elements(source)
+                        if candidate.get("name") == name), None)
+        if element is None:
+            raise EditRejected(
+                f"the source document carries no IED {name!r}")
+        if name in present:
+            raise EditRejected(
+                f"the target document already holds an IED named {name!r}; "
+                f"insert it under a name that is free, or rename it after "
+                f"inserting with update_ied")
+        incoming.append(element)
+
+    ids: List[str] = []
+    known = set()
+    for element in incoming:
+        for id_ in _ln_type_ids(source, element):
+            if id_ not in known:
+                known.add(id_)
+                ids.append(id_)
+
+    # The plan and the edits are the SAME computation over the same unchanged
+    # documents -- `import_lnode_types` calls `lnode_type_conflicts` itself --
+    # so the mapping the copies are re-pointed with is the one the inserted
+    # types actually carry. A test asserts that on the corpus rather than
+    # leaving it to the reading.
+    plan = lnode_type_conflicts(doc, source, ids, on_conflict)
+    type_edits = import_lnode_types(doc, source, ids, on_conflict)
+
+    edits: List = []
+    if add_communication:
+        edits.extend(_communication_edits(doc, source, names))
+
+    reference = reference_for(target_root, _qualified(doc, "IED"))
+    for element in incoming:
+        node = copy.deepcopy(element)
+        _repoint_ln_type(source, node, plan.ids)
+        edits.append(Insert(target_root, node, reference))
+
+    edits.extend(type_edits)
     return edits

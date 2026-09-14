@@ -22,16 +22,20 @@ vendor markup.
 
 import tempfile
 import unittest
+from collections import Counter
 
 from py61850.scl import (
     EditRejected,
     IED_NAME_ELEMENTS,
     ORPHAN_IED_NAME,
+    Insert,
     Remove,
     SclDocument,
     SetAttributes,
     control_block_obj_ref,
+    insert_ied,
     iter_local,
+    lnode_type_conflicts,
     remove_ied,
     strip_ns,
     update_ied,
@@ -928,3 +932,771 @@ class TestCorpus(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+# -- inserting --------------------------------------------------------------
+
+def importable(name="R1", subnet="SRCNET", subnet_type="8-MMS",
+               lnode="T_LLN0", do="SPS_1", aps=("S1",), ext_refs=(),
+               ln_types=()):
+    """A source document holding one IED, its access points and its types.
+
+    Deliberately small: what the corpus cannot show is a target with no
+    `Communication` at all, or a `SubNetwork` that exists and is empty, and
+    those are what these fixtures are for. `TestInsertCorpus` does the real
+    thing -- 8,967 elements and 319 templates.
+    """
+    body = fx.ln0(ln_type=lnode, body=fx.inputs(*ext_refs) if ext_refs else "")
+    for index, ln_type in enumerate(ln_types, start=1):
+        body += fx.ln("MMXU", inst=str(index), ln_type=ln_type)
+    ied_body = "".join(
+        fx.access_point(ap, fx.ldevice("LD", body) if ap == aps[0] else "")
+        for ap in aps)
+    types = [fx.lnode_type(lnode, "LLN0", dos=(("Beh", do),)),
+             fx.do_type(do, cdc="SPS")]
+    for ln_type in ln_types:
+        types.append(fx.lnode_type(ln_type, "MMXU", dos=(("Beh", do),)))
+    return fx.scl(
+        fx.header(),
+        fx.communication(fx.subnetwork(
+            subnet, tuple(fx.connected_ap(name, ap) for ap in aps),
+            type_=subnet_type)),
+        fx.ied(name, ied_body),
+        fx.templates(*types))
+
+
+class _Insert(unittest.TestCase):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self._n = 0
+
+    def doc(self, text):
+        self._n += 1
+        return SclDocument.parse(
+            fx.write(self._dir.name, f"d{self._n}.scd", text))
+
+    def source(self, **kwargs):
+        return self.doc(importable(**kwargs))
+
+    def target(self, *sections):
+        return self.doc(fx.scl(fx.header(), *sections))
+
+    def sections(self, doc):
+        return [strip_ns(child.tag) for child in doc.root]
+
+    def subnets(self, doc):
+        out = []
+        for child in doc.root:
+            if strip_ns(child.tag) != "Communication":
+                continue
+            for subnet in child:
+                aps = [ap.get("iedName") for ap in subnet
+                       if strip_ns(ap.tag) == "ConnectedAP"]
+                out.append((subnet.get("name"), subnet.get("type"), aps))
+        return out
+
+    def ieds(self, doc):
+        return [child.get("name") for child in doc.root
+                if strip_ns(child.tag) == "IED"]
+
+    def pool(self, doc):
+        for child in doc.root:
+            if strip_ns(child.tag) == "DataTypeTemplates":
+                return {(strip_ns(t.tag), t.get("id")) for t in child}
+        return set()
+
+
+class TestInsertRefusals(_Insert):
+    def test_a_bare_string_is_refused_rather_than_read_per_character(self):
+        """`names` is a sequence, as `import_lnode_types`'s `ids` is, and for
+        the same reason: ``"R1"`` would otherwise import ``R`` and ``1``."""
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(self.target(), self.source(), "R1")
+        self.assertIn("one character at a time", str(cm.exception))
+
+    def test_a_name_the_source_does_not_carry(self):
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(self.target(), self.source(), ["NOPE"])
+        self.assertIn("NOPE", str(cm.exception))
+
+    def test_a_name_given_twice_in_one_call(self):
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(self.target(), self.source(), ["R1", "R1"])
+        self.assertIn("twice", str(cm.exception))
+
+    def test_a_name_the_target_already_holds_is_refused_not_renamed(self):
+        """The reference checks nothing -- it returns `Insert[]`. Ours refuses,
+        because `update_ied` refuses the same collision, because renaming would
+        need an allocator that is A17's, and because a device name is the
+        engineer's rather than this function's to invent."""
+        target = self.target(fx.ied("R1"))
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(target, self.source(), ["R1"])
+        self.assertIn("already holds an IED named 'R1'", str(cm.exception))
+        self.assertIn("update_ied", str(cm.exception))
+
+    def test_a_source_that_is_not_a_document(self):
+        """The message is `data_types`' own, so there is one explanation of
+        why a source has to be a document and not an element."""
+        target = self.target()
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(target, target.root, ["R1"])
+        self.assertIn("SclDocument", str(cm.exception))
+
+    def test_a_source_in_another_namespace(self):
+        source = self.doc(importable().replace(
+            "http://www.iec.ch/61850/2003/SCL",
+            "http://www.iec.ch/61850/2003/SCL2"))
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(self.target(), source, ["R1"])
+        self.assertIn("namespace", str(cm.exception))
+
+    def test_an_unknown_policy_is_refused_before_anything_is_read(self):
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(self.target(), self.source(), ["R1"],
+                       on_conflict="clobber")
+        self.assertIn("on_conflict", str(cm.exception))
+
+    def test_a_conflicting_type_refuses_by_default(self):
+        """`on_conflict` is passed through unchanged, so the default that Q34
+        argued for is the default here without being re-decided."""
+        target = self.target(fx.templates(
+            fx.lnode_type("T_LLN0", "LLN0", dos=(("Beh", "OTHER"),)),
+            fx.do_type("OTHER", cdc="SPS")))
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(target, self.source(), ["R1"])
+        self.assertIn("T_LLN0", str(cm.exception))
+
+    def test_a_rejected_insert_changes_nothing(self):
+        target = self.target(fx.ied("R1"))
+        before = target.to_bytes()
+        with self.assertRaises(EditRejected):
+            insert_ied(target, self.source(), ["R1"])
+        self.assertEqual(target.to_bytes(), before)
+
+
+class TestInsertReturnsOnlyInserts(_Insert):
+    def test_every_edit_is_an_insert_as_the_reference_declares(self):
+        """`insertIed` is declared to return `Insert[]` -- no `Remove`, no
+        `SetAttributes`. Ours matches under the default policy, which is what
+        makes the whole import invert to a plain removal."""
+        edits = insert_ied(self.target(), self.source(), ["R1"],
+                           add_communication=True)
+        self.assertTrue(all(isinstance(e, Insert) for e in edits))
+
+    def test_overwrite_is_the_one_policy_that_also_removes(self):
+        """The divergence is `on_conflict`'s, not this function's: replacing a
+        target type means taking the old one out first."""
+        target = self.target(fx.templates(
+            fx.lnode_type("T_LLN0", "LLN0", dos=(("Beh", "OTHER"),)),
+            fx.do_type("OTHER", cdc="SPS")))
+        edits = insert_ied(target, self.source(), ["R1"],
+                           on_conflict="overwrite")
+        self.assertTrue(any(isinstance(e, Remove) for e in edits))
+
+
+class TestInsertCopies(_Insert):
+    def test_the_ied_arrives_with_its_whole_subtree(self):
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        self.assertEqual(self.ieds(target), ["R1"])
+        inserted = next(c for c in target.root if strip_ns(c.tag) == "IED")
+        self.assertEqual([strip_ns(e.tag) for e in inserted.iter()][:4],
+                         ["IED", "AccessPoint", "Server", "LDevice"])
+
+    def test_the_source_document_is_not_touched(self):
+        """The reference MOVES its elements, because a browser has
+        `importNode` and its source is a throwaway parse of an upload. Ours
+        copies -- Q31 §6 -- so the caller may go on using the source."""
+        target, source = self.target(), self.source()
+        before = source.to_bytes()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(source.to_bytes(), before)
+
+    def test_the_inserted_element_is_not_the_source_element(self):
+        target, source = self.target(), self.source()
+        original = next(c for c in source.root if strip_ns(c.tag) == "IED")
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        inserted = next(c for c in target.root if strip_ns(c.tag) == "IED")
+        self.assertIsNot(inserted, original)
+
+    def test_the_types_come_with_it(self):
+        target, source = self.target(), self.source()
+        self.assertEqual(self.pool(target), set())
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        self.assertEqual(self.pool(target),
+                         {("LNodeType", "T_LLN0"), ("DOType", "SPS_1")})
+
+    def test_two_ieds_sharing_a_type_insert_it_once(self):
+        """The whole reason `names` is a list. As two calls each would plan
+        against a target that does not yet hold what the other is inserting
+        and each would emit an Insert for the same type."""
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.ied("R1", fx.access_point(
+                "S1", fx.ldevice("LD", fx.ln0(ln_type="T_LLN0")))),
+            fx.ied("R2", fx.access_point(
+                "S1", fx.ldevice("LD", fx.ln0(ln_type="T_LLN0")))),
+            fx.templates(fx.lnode_type("T_LLN0", "LLN0",
+                                       dos=(("Beh", "SPS_1"),)),
+                         fx.do_type("SPS_1", cdc="SPS"))))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1", "R2"]))
+        self.assertEqual(self.ieds(target), ["R1", "R2"])
+        self.assertEqual(self.pool(target),
+                         {("LNodeType", "T_LLN0"), ("DOType", "SPS_1")})
+
+    def test_the_named_order_is_the_document_order(self):
+        source = self.doc(fx.scl(
+            fx.header(), fx.ied("R1"), fx.ied("R2"), fx.ied("R3")))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R3", "R1"]))
+        self.assertEqual(self.ieds(target), ["R3", "R1"])
+
+    def test_an_ext_ref_naming_a_device_the_target_lacks_is_left_alone(self):
+        """4,291 of the corpus's 4,291 `ExtRef@iedName` name an IED of their
+        own file, so a binding that dangles after an import dangles only
+        because the rest of the source was left behind. Blanking it would
+        destroy a subscription the next name in the list may resolve."""
+        ext = fx.ext_ref(iedName="ELSEWHERE", ldInst="LD", lnClass="MMXU",
+                         doName="TotW", intAddr="IN1")
+        source = self.source(ext_refs=(ext,))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        self.assertEqual(
+            [el.get("iedName") for el in iter_local(target.root, "ExtRef")],
+            ["ELSEWHERE"])
+
+
+class TestInsertRepointsLnType(_Insert):
+    """Under `"rename"` the types enter under fresh ids, and a copy that kept
+    the source's would name the TARGET's own different type. On the corpus
+    that is 114 of one IED's 175 logical nodes."""
+
+    def conflicting_target(self):
+        return self.target(fx.templates(
+            fx.lnode_type("T_LLN0", "LLN0", dos=(("Beh", "OTHER"),)),
+            fx.do_type("OTHER", cdc="SPS")))
+
+    def ln_types(self, doc):
+        return [el.get("lnType") for el in iter_local(doc.root, "LN0")
+                if el.get("lnType")]
+
+    def test_a_renamed_type_is_followed_into_the_copy(self):
+        target, source = self.conflicting_target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     on_conflict="rename"))
+        self.assertEqual(self.ln_types(target), ["T_LLN0_1"])
+        self.assertIn(("LNodeType", "T_LLN0_1"), self.pool(target))
+
+    def test_the_target_s_own_type_and_its_users_are_untouched(self):
+        target = self.doc(fx.scl(
+            fx.header(),
+            fx.ied("OLD", fx.access_point(
+                "S1", fx.ldevice("LD", fx.ln0(ln_type="T_LLN0")))),
+            fx.templates(fx.lnode_type("T_LLN0", "LLN0",
+                                       dos=(("Beh", "OTHER"),)),
+                         fx.do_type("OTHER", cdc="SPS"))))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     on_conflict="rename"))
+        self.assertEqual(self.ln_types(target), ["T_LLN0", "T_LLN0_1"])
+
+    def test_every_ln_type_in_the_result_resolves(self):
+        """The check that matters, and it is a count of the RESULT rather than
+        a reading of the edit list -- Q34 §4's lesson."""
+        target = self.conflicting_target()
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     on_conflict="rename"))
+        pool = {id_ for kind, id_ in self.pool(target)
+                if kind == "LNodeType"}
+        for element in target.root.iter():
+            if strip_ns(element.tag) in ("LN", "LN0", "LNode"):
+                if element.get("lnType"):
+                    self.assertIn(element.get("lnType"), pool)
+
+    def test_nothing_is_repointed_when_nothing_is_renamed(self):
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        self.assertEqual(self.ln_types(target), ["T_LLN0"])
+
+    def test_a_private_type_attribute_is_not_a_template_reference(self):
+        """229 of `QPC2_TR1_AL11`'s attributes are ``Private@type``. They are
+        a vendor's own vocabulary and this function must not read them as
+        `LNodeType` ids."""
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.ied("R1", '<Private type="T_LLN0">x</Private>'
+                   + fx.access_point("S1", fx.ldevice(
+                       "LD", fx.ln0(ln_type="T_LLN0")))),
+            fx.templates(fx.lnode_type("T_LLN0", "LLN0",
+                                       dos=(("Beh", "SPS_1"),)),
+                         fx.do_type("SPS_1", cdc="SPS"))))
+        target = self.conflicting_target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     on_conflict="rename"))
+        private = next(iter_local(target.root, "Private"))
+        self.assertEqual(private.get("type"), "T_LLN0")
+        self.assertEqual(self.ln_types(target), ["T_LLN0_1"])
+
+
+class TestInsertCommunication(_Insert):
+    def test_it_is_off_by_default(self):
+        """The reference's `InsertIedOptions` is an optional argument, and
+        this package asks for the larger action rather than arriving at it."""
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        self.assertEqual(self.subnets(target), [])
+        self.assertNotIn("Communication", self.sections(target))
+
+    def test_a_missing_subnetwork_is_created(self):
+        """The ordinary case, not the edge: the three corpus exports share not
+        one `SubNetwork` name between them in any of the six ordered pairs."""
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target), [("SRCNET", "8-MMS", ["R1"])])
+
+    def test_a_created_subnetwork_carries_name_and_type_and_no_children(self):
+        """The source `SubNetwork`'s own `Text`, `BitRate` and `Private`
+        describe the SOURCE's network. A `Private` in particular is the vendor
+        bookkeeping `sellib` and `siemenslib` read."""
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.communication(
+                '<SubNetwork name="SRCNET" type="8-MMS">'
+                "<Text>source net</Text><BitRate unit=\"b/s\">100</BitRate>"
+                '<Private type="vendor">keep me out</Private>'
+                + fx.connected_ap("R1", "S1") + "</SubNetwork>"),
+            fx.ied("R1", fx.access_point("S1")),
+            fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        subnet = next(iter_local(target.root, "SubNetwork"))
+        self.assertEqual(subnet.attrib, {"name": "SRCNET", "type": "8-MMS"})
+        self.assertEqual([strip_ns(c.tag) for c in subnet], ["ConnectedAP"])
+
+    def test_a_matching_subnetwork_receives_the_copy(self):
+        target = self.target(fx.communication(
+            fx.subnetwork("SRCNET", (fx.connected_ap("OTHER", "S1"),))))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target),
+                         [("SRCNET", "8-MMS", ["OTHER", "R1"])])
+
+    def test_a_matching_but_EMPTY_subnetwork_receives_it_too(self):
+        """The regression this phase found by counting the result. An
+        `Element` with no children is FALSY in ElementTree, so a lookup
+        written as ``have.get(name) or created.get(name)`` silently discards
+        an existing empty `SubNetwork` and builds a second one beside it.
+        Invisible on the corpus: all 17 of its SubNetworks hold access
+        points."""
+        target = self.target(fx.communication(fx.subnetwork("SRCNET")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target), [("SRCNET", "8-MMS", ["R1"])])
+
+    def test_a_matching_subnetwork_keeps_its_own_type(self):
+        """Rewriting `SubNetwork@type` to the source's would re-type every
+        other `ConnectedAP` already in it. No corpus pair shares a name, so
+        this never fires on real material and is pinned for that reason."""
+        target = self.target(fx.communication(
+            fx.subnetwork("SRCNET", type_="8-MMS/TCP")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target),
+                         [("SRCNET", "8-MMS/TCP", ["R1"])])
+
+    def test_every_access_point_comes_not_merely_the_first(self):
+        """A device is not one access point: `mixed.scd` puts 12 of its 14
+        IEDs in two SubNetworks and `sel.scd` puts `RTAC_1` in ten."""
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.communication(
+                fx.subnetwork("A", (fx.connected_ap("R1", "S1"),)),
+                fx.subnetwork("B", (fx.connected_ap("R1", "S2"),))),
+            fx.ied("R1", fx.access_point("S1") + fx.access_point("S2")),
+            fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target),
+                         [("A", "8-MMS", ["R1"]), ("B", "8-MMS", ["R1"])])
+
+    def test_two_ieds_in_one_new_subnetwork_create_it_once(self):
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.communication(fx.subnetwork(
+                "N", (fx.connected_ap("R1", "S1"),
+                      fx.connected_ap("R2", "S1")))),
+            fx.ied("R1", fx.access_point("S1"))
+            + fx.ied("R2", fx.access_point("S1")),
+            fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1", "R2"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target), [("N", "8-MMS", ["R1", "R2"])])
+
+    def test_only_the_named_ieds_access_points_are_copied(self):
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.communication(fx.subnetwork(
+                "N", (fx.connected_ap("R1", "S1"),
+                      fx.connected_ap("R2", "S1")))),
+            fx.ied("R1", fx.access_point("S1"))
+            + fx.ied("R2", fx.access_point("S1")),
+            fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target), [("N", "8-MMS", ["R1"])])
+
+    def test_the_connected_ap_subtree_comes_whole(self):
+        """Q31 §6: the subtree is copied and EDITING its `Address` belongs in
+        `address.py`, not here. `IP`, `IP-SUBNET` and the `OSI-*` parameters
+        arrive as the source wrote them."""
+        source = self.doc(fx.scl(
+            fx.header(),
+            fx.communication(fx.subnetwork("N", (fx.connected_ap(
+                "R1", "S1", body=fx.address(**{"IP": "10.0.0.1",
+                                               "IP-SUBNET": "255.255.255.0"})),))),
+            fx.ied("R1", fx.access_point("S1")),
+            fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        values = {p.get("type"): p.text
+                  for p in iter_local(target.root, "P")}
+        self.assertEqual(values, {"IP": "10.0.0.1",
+                                  "IP-SUBNET": "255.255.255.0"})
+
+    def test_an_orphan_connected_ap_in_the_target_is_refused(self):
+        """The target holds a `ConnectedAP` naming a device it does not have.
+        Adding a second description of the same access point would make the
+        document say two things. No corpus file contains one: all 79 name an
+        IED that is present."""
+        target = self.target(fx.communication(
+            fx.subnetwork("SRCNET", (fx.connected_ap("R1", "S1"),))))
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(target, self.source(), ["R1"],
+                       add_communication=True)
+        self.assertIn("ConnectedAP", str(cm.exception))
+
+    def test_a_source_ied_with_no_access_point_copies_nothing(self):
+        source = self.doc(fx.scl(fx.header(), fx.ied("R1"), fx.templates()))
+        target = self.target()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.subnets(target), [])
+
+
+class TestInsertPlacement(_Insert):
+    """`Communication`, `IED` and `DataTypeTemplates` are in that order in the
+    SCL content model, and a target missing two of the three resolves both
+    insertion references to "append" -- so the edits have to be built in that
+    order or the `Communication` lands after the IED it describes."""
+
+    def assert_order(self, target):
+        sections = [s for s in self.sections(target)
+                    if s in ("Communication", "IED", "DataTypeTemplates")]
+        self.assertEqual(sections, sorted(
+            sections, key=("Communication", "IED",
+                           "DataTypeTemplates").index))
+
+    def test_a_target_with_none_of_the_three(self):
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"],
+                                     add_communication=True))
+        self.assertEqual(self.sections(target),
+                         ["Header", "Communication", "IED",
+                          "DataTypeTemplates"])
+
+    def test_a_target_with_data_type_templates_only(self):
+        target = self.target(fx.templates(fx.lnode_type("OTHER")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assert_order(target)
+
+    def test_a_target_with_communication_only(self):
+        target = self.target(fx.communication(fx.subnetwork("N")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assert_order(target)
+
+    def test_a_target_with_all_three_already(self):
+        target = self.target(
+            fx.communication(fx.subnetwork("N")), fx.ied("OTHER"),
+            fx.templates(fx.lnode_type("OTHER")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"],
+                                     add_communication=True))
+        self.assert_order(target)
+        self.assertEqual(self.ieds(target), ["OTHER", "R1"])
+
+    def test_the_ied_goes_among_the_ieds_not_after_the_templates(self):
+        target = self.target(fx.ied("OTHER"),
+                             fx.templates(fx.lnode_type("OTHER")))
+        target.apply_edit(insert_ied(target, self.source(), ["R1"]))
+        self.assertEqual(self.sections(target),
+                         ["Header", "IED", "IED", "DataTypeTemplates"])
+
+
+class TestInsertInvertible(_Insert):
+    def test_an_import_inverts_to_the_byte(self):
+        target, source = self.target(), self.source()
+        before = target.to_bytes()
+        undo = target.apply_edit(insert_ied(target, source, ["R1"],
+                                            add_communication=True))
+        self.assertNotEqual(target.to_bytes(), before)
+        target.apply_edit(undo)
+        self.assertEqual(target.to_bytes(), before)
+
+    def test_a_renaming_import_inverts_to_the_byte(self):
+        target = self.target(fx.templates(
+            fx.lnode_type("T_LLN0", "LLN0", dos=(("Beh", "OTHER"),)),
+            fx.do_type("OTHER", cdc="SPS")))
+        before = target.to_bytes()
+        undo = target.apply_edit(insert_ied(
+            target, self.source(), ["R1"], on_conflict="rename",
+            add_communication=True))
+        target.apply_edit(undo)
+        self.assertEqual(target.to_bytes(), before)
+
+    def test_an_import_and_a_removal_is_the_file_it_was(self):
+        """The two halves of this module meeting: what `insert_ied` writes,
+        `remove_ied` takes back out. The templates stay, as A13 decided and
+        Q34 §7 confirmed -- so this compares the IED sections, not the file."""
+        target, source = self.target(), self.source()
+        target.apply_edit(insert_ied(target, source, ["R1"]))
+        inserted = next(c for c in target.root if strip_ns(c.tag) == "IED")
+        target.apply_edit(remove_ied(target, Remove(inserted)))
+        self.assertEqual(self.ieds(target), [])
+
+
+class TestInsertCorpus(unittest.TestCase):
+    """The measurements every decision in `insert_ied` was taken on, and one
+    real import of a real device across two vendors."""
+
+    FILES = ("sel.scd", "mixed.scd", "siemens.scd")
+    NAMES = ("QPC2_TR1_AL11", "QPC2_TR1_AL12")
+
+    def corpus(self, name):
+        path = roundtrip.CORPUS / name
+        if not path.is_file():
+            self.skipTest("the corpus is not in this distribution")
+        return SclDocument.parse(path)
+
+    def ieds(self, doc):
+        return [child for child in doc.root if strip_ns(child.tag) == "IED"]
+
+    def named(self, doc, name):
+        return next(el for el in self.ieds(doc) if el.get("name") == name)
+
+    def subnets(self, doc):
+        out = []
+        for child in doc.root:
+            if strip_ns(child.tag) == "Communication":
+                out.extend(s for s in child if strip_ns(s.tag) == "SubNetwork")
+        return out
+
+    def pool(self, doc):
+        for child in doc.root:
+            if strip_ns(child.tag) == "DataTypeTemplates":
+                return [(strip_ns(t.tag), t.get("id")) for t in child]
+        return []
+
+    def ln_types(self, element):
+        return [el.get("lnType") for el in element.iter()
+                if strip_ns(el.tag) in ("LN", "LN0") and el.get("lnType")]
+
+    # -- the measurements the decisions rest on -----------------------------
+
+    def test_no_two_exports_share_a_subnetwork_name(self):
+        """Why a missing `SubNetwork` is CREATED rather than refused: in all
+        six ordered pairs of the three exports there is not one name in
+        common, so refusing would make `add_communication=True` fail on every
+        pair of real files there is."""
+        by_file = {name: {s.get("name") for s in self.subnets(self.corpus(name))}
+                   for name in self.FILES}
+        self.assertEqual(
+            sorted(by_file["siemens.scd"]), ["Default_subnet"])
+        for left in self.FILES:
+            for right in self.FILES:
+                if left != right:
+                    self.assertEqual(by_file[left] & by_file[right], set())
+
+    def test_a_device_is_not_one_access_point(self):
+        """Why every `ConnectedAP` is copied and not the first: 79 across the
+        corpus, and `mixed.scd` puts 12 of its 14 IEDs in two `SubNetwork`s
+        while `sel.scd` puts `RTAC_1` in ten."""
+        total = 0
+        for name in self.FILES:
+            doc = self.corpus(name)
+            per = {}
+            for subnet in self.subnets(doc):
+                for ap in subnet:
+                    if strip_ns(ap.tag) != "ConnectedAP":
+                        continue
+                    total += 1
+                    per.setdefault(ap.get("iedName"), set()).add(
+                        subnet.get("name"))
+            if name == "mixed.scd":
+                self.assertEqual(
+                    sum(1 for nets in per.values() if len(nets) > 1), 12)
+            if name == "sel.scd":
+                self.assertEqual(len(per["RTAC_1"]), 10)
+        self.assertEqual(total, 79)
+
+    def test_every_ext_ref_names_an_ied_of_its_own_file(self):
+        """Why `ExtRef@iedName` is left exactly as the source wrote it. All
+        4,291 resolve inside their own document, so a binding that dangles
+        after an import dangles only because the rest of the source was left
+        behind -- and the next name in the list may be what resolves it."""
+        total = 0
+        for name in self.FILES:
+            doc = self.corpus(name)
+            own = {el.get("name") for el in self.ieds(doc)}
+            namespace = doc.root.tag[:doc.root.tag.index("}") + 1]
+            for element in doc.root.iter(namespace + "ExtRef"):
+                value = element.get("iedName")
+                if value:
+                    total += 1
+                    self.assertIn(value, own)
+        self.assertEqual(total, 4291)
+
+    def test_the_name_collision_is_real_material(self):
+        """Why the collision is refused rather than left unchecked as the
+        reference leaves it: `sel.scd` and `siemens.scd` share eight device
+        names, so an unchecked insert would produce a document with two IEDs
+        of one name."""
+        names = {name: {el.get("name") for el in self.ieds(self.corpus(name))}
+                 for name in self.FILES}
+        self.assertEqual(
+            len(names["sel.scd"] & names["siemens.scd"]), 8)
+        self.assertEqual(names["sel.scd"] & names["mixed.scd"], set())
+        self.assertEqual(names["mixed.scd"] & names["siemens.scd"], set())
+
+    def test_two_ieds_of_one_file_share_all_their_types(self):
+        """Why `names` is a LIST. `QPC2_TR1_AL11` and `QPC2_TR1_AL12` use the
+        same 82 `LNodeType`, so as two calls the second would plan against a
+        target that does not yet hold what the first is inserting."""
+        source = self.corpus("siemens.scd")
+        first, second = (set(self.ln_types(self.named(source, n)))
+                         for n in self.NAMES)
+        self.assertEqual(len(first), 82)
+        self.assertEqual(first, second)
+
+    # -- the import itself --------------------------------------------------
+
+    def imported(self, **kwargs):
+        target, source = self.corpus("mixed.scd"), self.corpus("siemens.scd")
+        edits = insert_ied(target, source, list(self.NAMES),
+                           on_conflict="rename", **kwargs)
+        return target, source, edits
+
+    def test_the_default_policy_refuses_on_forty_ids(self):
+        target, source = self.corpus("mixed.scd"), self.corpus("siemens.scd")
+        with self.assertRaises(EditRejected) as cm:
+            insert_ied(target, source, list(self.NAMES))
+        self.assertIn("40 data type(s)", str(cm.exception))
+
+    def test_the_whole_import_is_inserts(self):
+        _, _, edits = self.imported(add_communication=True)
+        self.assertEqual(len(edits), 364)
+        self.assertTrue(all(isinstance(edit, Insert) for edit in edits))
+
+    def test_the_closure_arrives_once_for_both_devices(self):
+        """82 `LNodeType` pulling 163 `DOType`, 20 `DAType` and 94 `EnumType`
+        -- Q34 §3's closure for one of these devices, and the other adds none
+        because it uses the same 82."""
+        target, _, edits = self.imported()
+        before = Counter(kind for kind, _ in self.pool(target))
+        target.apply_edit(edits)
+        after = Counter(kind for kind, _ in self.pool(target))
+        self.assertEqual(
+            {kind: after[kind] - before[kind] for kind in after},
+            {"LNodeType": 82, "DOType": 163, "DAType": 20, "EnumType": 94})
+
+    def test_no_id_is_written_twice_into_the_pool(self):
+        """Q34 §5's defect, checked by counting the RESULT: a renamed id
+        landing on one the same import is writing would leave the pool a type
+        short and nothing in the edit list would show it."""
+        target, _, edits = self.imported()
+        target.apply_edit(edits)
+        pool = self.pool(target)
+        self.assertEqual(len(pool), len(set(pool)))
+
+    def test_every_ln_type_in_the_result_resolves(self):
+        target, _, edits = self.imported()
+        target.apply_edit(edits)
+        declared = {id_ for kind, id_ in self.pool(target)
+                    if kind == "LNodeType"}
+        for element in target.root.iter():
+            if strip_ns(element.tag) in ("LN", "LN0", "LNode"):
+                if element.get("lnType"):
+                    self.assertIn(element.get("lnType"), declared)
+
+    def test_the_repointing_is_not_hypothetical(self):
+        """228 of the two devices' 350 logical nodes name one of the 40
+        conflicting types, so without :func:`_repoint_ln_type` more than half
+        the imported instances would name the TARGET's own different type."""
+        target, source, edits = self.imported()
+        plan = lnode_type_conflicts(
+            target, source,
+            sorted({t for name in self.NAMES
+                    for t in self.ln_types(self.named(source, name))}),
+            "rename")
+        renamed = {key for key, fresh in plan.ids.items() if key[1] != fresh}
+        self.assertEqual(len(renamed), 40)
+        target.apply_edit(edits)
+        # Against the SOURCE's own values, position by position -- not against
+        # a suffix. `mixed.scd` already uses two `_n` suffixes of one id, so
+        # Q34 §5's rename lands on `..._3` and a test reading the spelling
+        # would miscount the very case that question exists for.
+        moved = total = 0
+        for name in self.NAMES:
+            mine = self.ln_types(self.named(target, name))
+            theirs = self.ln_types(self.named(source, name))
+            self.assertEqual(len(mine), len(theirs))
+            total += len(mine)
+            moved += sum(1 for a, b in zip(mine, theirs) if a != b)
+        self.assertEqual(total, 350)
+        self.assertEqual(moved, 228)
+
+    def test_the_access_points_land_in_a_created_subnetwork(self):
+        target, _, edits = self.imported(add_communication=True)
+        target.apply_edit(edits)
+        made = next(s for s in self.subnets(target)
+                    if s.get("name") == "Default_subnet")
+        self.assertEqual(made.get("type"), "8-MMS")
+        self.assertEqual([ap.get("iedName") for ap in made],
+                         list(self.NAMES))
+
+    def test_the_source_document_is_not_touched(self):
+        target, source, edits = self.imported(add_communication=True)
+        before = source.to_bytes()
+        target.apply_edit(edits)
+        self.assertEqual(source.to_bytes(), before)
+
+    def test_the_import_inverts_to_the_byte(self):
+        target, _, edits = self.imported(add_communication=True)
+        before = target.to_bytes()
+        target.apply_edit(target.apply_edit(edits))
+        self.assertEqual(target.to_bytes(), before)
+
+    def test_the_edited_document_round_trips(self):
+        target, _, edits = self.imported(add_communication=True)
+        target.apply_edit(edits)
+        data = target.to_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            path = fx.write(directory, "out.scd", data.decode("utf-8"))
+            self.assertEqual(SclDocument.parse(path).to_bytes(), data)
+
+    def test_the_sections_stay_in_schema_order(self):
+        target, _, edits = self.imported(add_communication=True)
+        target.apply_edit(edits)
+        order = [strip_ns(child.tag) for child in target.root]
+        self.assertLess(order.index("Communication"), order.index("IED"))
+        self.assertLess(order.index("IED"),
+                        order.index("DataTypeTemplates"))
