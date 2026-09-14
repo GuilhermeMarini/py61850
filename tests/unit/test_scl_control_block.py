@@ -25,6 +25,7 @@ from py61850.scl import (
     Remove,
     SclDocument,
     SetAttributes,
+    SetTextContent,
     control_block_gse_or_smv,
     control_block_obj_ref,
     control_blocks,
@@ -37,6 +38,7 @@ from py61850.scl import (
     updated_conf_rev,
 )
 from py61850.scl.control_block import CONTROL_BLOCK_TAGS
+from py61850.scl.supervision import _supervision_lns, _supervision_values
 from tests.unit import roundtrip
 from tests.unit import scl_fixtures as fx
 
@@ -56,7 +58,8 @@ MEMBERS = (fx.fcda("CFG", "GGIO", "Ind01", "ST", da_name="stVal"),
            fx.fcda("CFG", "GGIO", "Ind02", "ST", da_name="stVal"))
 
 
-def station(ln0_body=None, ap_body=None, subscriber=True):
+def station(ln0_body=None, ap_body=None, subscriber=True,
+            subscriber_nodes=()):
     """A two-IED station: `PUB` publishes, `SUB` listens.
 
     `PUB` holds one `LDevice` `CFG` whose `LN0` carries two datasets and the
@@ -98,7 +101,10 @@ def station(ln0_body=None, ap_body=None, subscriber=True):
                 fx.ext_ref(intAddr="in3", iedName="PUB", ldInst="CFG",
                            lnClass="GGIO", doName="Ind01", daName="stVal",
                            serviceType="Report", srcCBName="RCB1",
-                           srcLDInst="CFG", srcLNClass="LLN0")))))))
+                           srcLDInst="CFG", srcLNClass="LLN0"))
+            # Supervision nodes go beside the Inputs, in the same LN0's
+            # logical device, which is where every corpus file puts them.
+            + "".join(subscriber_nodes))))))
     body.append(fx.communication(
         fx.subnetwork("W1", [fx.connected_ap("PUB", "S1", ap_body)])))
     return fx.scl(*body)
@@ -601,11 +607,66 @@ class TestRemoveControlBlock(_Base):
         doc.apply_edit(undo)
         self.assertEqual(doc.to_bytes(), before)
 
-    def test_supervision_cannot_be_asked_for_yet(self):
-        doc = self.doc()
-        with self.assertRaises(EditRejected) as caught:
-            self.remove(doc, "GSEControl", "GCB1", ignore_supervision=False)
-        self.assertIn("supervision", str(caught.exception))
+    def supervised(self):
+        """The station, with `SUB` supervising `GCB1` the way a real file
+        does -- 549 of the corpus's 600 supervision nodes carry exactly this
+        shape, a `GoCBRef/setSrcRef/Val` holding the block's object
+        reference."""
+        return self.doc(station(subscriber_nodes=(
+            fx.supervision(inst="1", cb_ref="PUBCFG/LLN0.GCB1"),
+            fx.supervision(inst="2", cb_ref="PUBCFG/LLN0.OTHER"),
+        )))
+
+    def test_supervision_naming_the_removed_block_is_blanked(self):
+        """**Driven by the block, not by the ExtRefs.** The question
+        `remove_control_block` answers is *this block is gone*, which is the
+        sweep A13's `remove_ied` already performs for the blocks inside a
+        removed IED -- without it, removing an IED and removing one of its
+        control blocks would leave different supervision standing.
+
+        A supervision watching a DIFFERENT block is not touched, which is what
+        makes this a sweep and not a blanket."""
+        doc = self.supervised()
+        watchers = [val for val, _ in _supervision_values(doc, ("GoCBRef",))]
+        self.assertEqual([(val.text or "") for val in watchers],
+                         ["PUBCFG/LLN0.GCB1", "PUBCFG/LLN0.OTHER"])
+        doc.apply_edit(self.remove(doc, "GSEControl", "GCB1",
+                                   ignore_supervision=False))
+        self.assertEqual([(val.text or "") for val in watchers],
+                         ["", "PUBCFG/LLN0.OTHER"])
+
+    def test_the_default_leaves_supervision_alone(self):
+        """`True` is the default and stays it; the value survives the removal
+        of the block it names. Q32 §9 settled that flipping it would change
+        what an existing caller writes."""
+        doc = self.supervised()
+        watchers = [val for val, _ in _supervision_values(doc, ("GoCBRef",))]
+        doc.apply_edit(self.remove(doc, "GSEControl", "GCB1"))
+        self.assertEqual([(val.text or "") for val in watchers],
+                         ["PUBCFG/LLN0.GCB1", "PUBCFG/LLN0.OTHER"])
+
+    def test_the_value_is_blanked_once_and_the_node_is_kept(self):
+        """The `unsubscribe` inside step 2 is told to ignore supervision, so
+        the subscriber whose ExtRefs are going does not blank the same `Val`
+        a second time. Two edits on one element is two history entries where
+        the document needs one."""
+        doc = self.supervised()
+        edits = self.remove(doc, "GSEControl", "GCB1",
+                            ignore_supervision=False)
+        blanks = [e for e in edits if isinstance(e, SetTextContent)]
+        self.assertEqual(len(blanks), 1)
+        self.assertIsNone(blanks[0].text)
+        self.assertEqual(len(list(_supervision_lns(
+            doc, _named(doc, "IED", "SUB"), "LGOS"))), 2)
+
+    def test_it_is_still_one_history_entry_with_supervision_on(self):
+        doc = self.supervised()
+        before = doc.to_bytes()
+        undo = doc.apply_edit(self.remove(doc, "GSEControl", "GCB1",
+                                          ignore_supervision=False))
+        self.assertNotEqual(doc.to_bytes(), before)
+        doc.apply_edit(undo)
+        self.assertEqual(doc.to_bytes(), before)
 
     def test_it_refuses_anything_that_is_not_a_remove_of_a_control_block(self):
         doc = self.doc()
@@ -617,10 +678,14 @@ class TestRemoveControlBlock(_Base):
         self.assertIn("DataSet", str(caught.exception))
 
     def test_a_refusal_changes_nothing(self):
+        """The vehicle is a `Remove` of something that is not a control block.
+        It used to be `ignore_supervision=False`, which refused outright until
+        A14b made it do the work instead -- so the test needed a refusal that
+        is still a refusal."""
         doc = self.doc()
         before = doc.to_bytes()
         with self.assertRaises(EditRejected):
-            self.remove(doc, "GSEControl", "GCB1", ignore_supervision=False)
+            remove_control_block(doc, Remove(_named(doc, "DataSet", "DS1")))
         self.assertEqual(doc.to_bytes(), before)
 
 

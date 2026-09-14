@@ -129,11 +129,15 @@ subscribers and **none carries `IEDName` alone**. So
 the reference's does. The `IEDName` cleanup that genuinely exists is a
 removed IED's, and it belongs with `tIED`.
 
-**Supervision is not written yet.** `ignore_supervision` is carried for the
-same reason :func:`~py61850.scl.subscribe`'s is, and refuses `False` the same
-way: the corpus has 585 `LGOS` and 15 `LSVS` logical nodes and 1,750
-`setSrcRef` values waiting for it, and pretending to clean them up would be
-worse than saying it does not.
+**Supervision is written since A14b, and this module drives it by the BLOCK.**
+`remove_control_block(..., ignore_supervision=False)` blanks every `LGOS` or
+`LSVS` value naming the block it removes -- not only the ones whose subscriber
+it just unsubscribed. The corpus cannot tell the two readings apart, because
+0 of its 549 bound supervisions survive without a subscription; A13's
+:func:`~py61850.scl.remove_ied` is what breaks the tie, since it already
+sweeps by object reference and the two must not answer one defect differently.
+:mod:`py61850.scl.supervision` owns the expansion and this module calls it,
+which is the same seam A10 owns for a removed `DataSet`.
 
 ## The stale-model hazard, which this module makes worse
 
@@ -555,9 +559,18 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
     control blocks -- the ones naming no dataset at all -- reach step 3 and
     do nothing.
 
-    ``ignore_supervision`` behaves exactly as
-    :func:`~py61850.scl.unsubscribe`'s: supervision is not written yet, and
-    `False` is refused rather than quietly ignored.
+    ``ignore_supervision=False`` adds a fifth thing: **every supervision value
+    naming this block, blanked.** That is driven by the block rather than by
+    the `ExtRef` elements -- the question is *this block is gone*, not *this
+    subscription ended* -- and it is deliberately a superset of what
+    :func:`~py61850.scl.unsubscribe` would produce for it, so the `unsubscribe`
+    inside step 2 is told to ignore supervision and no value is blanked twice.
+    A13's :func:`~py61850.scl.remove_ied` already sweeps exactly this way for
+    the blocks inside a removed IED; without it here, removing an IED and
+    removing one of its control blocks would leave different supervision
+    behind. On the corpus the two readings give the same set -- 0 supervisions
+    survive without a subscription. This is a divergence from the reference,
+    whose only driver is `ExtRef`-driven; Q33 carries it.
 
     **The subscriber set is the one the `src*` attributes name**, and on this
     corpus that is provably the whole of it: of 830,000 elements across three
@@ -572,10 +585,6 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
     Raises :class:`~py61850.scl.EditRejected` if ``edit`` is not a `Remove` of
     a control block.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if not isinstance(edit, Remove):
         raise EditRejected(
             f"remove_control_block takes a Remove, not {type(edit).__name__}")
@@ -606,4 +615,11 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
     address = control_block_gse_or_smv(doc, control)
     if address is not None:
         edits.append(Remove(address))
+
+    if not ignore_supervision:
+        # Deferred: `supervision` imports this module at module level, so the
+        # dependency runs A14 -> A9 and back only here -- the same back-edge
+        # shape as the `data_set` call above, and Q25's.
+        from .supervision import _expand_control_block_supervision
+        edits.extend(_expand_control_block_supervision(doc, control))
     return edits

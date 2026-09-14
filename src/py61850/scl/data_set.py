@@ -639,17 +639,17 @@ def remove_data_set(doc, edit, ignore_supervision=True,
     to its attributes with it.
 
     ``ignore_supervision`` behaves exactly as
-    :func:`~py61850.scl.unsubscribe`'s: supervision is not written yet, and
-    `False` is refused rather than quietly ignored. ``update_conf_rev=False``
-    leaves the revisions alone for a caller that sets them itself.
+    :func:`~py61850.scl.unsubscribe`'s, because it **is** that flag: step 2 is
+    an `unsubscribe` and the supervision half rides on it, so `False` blanks
+    the supervision of every control block whose last `ExtRef` in a subscriber
+    this removal reaches. Nothing is owned here -- removing a dataset does not
+    remove the blocks that published it, so there is no block-driven sweep to
+    do, only the subscriptions that ended. ``update_conf_rev=False`` leaves
+    the revisions alone for a caller that sets them itself.
 
     Raises :class:`~py61850.scl.EditRejected` if ``edit`` is not a `Remove` of
     a `DataSet`.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if not isinstance(edit, Remove):
         raise EditRejected(
             f"remove_data_set takes a Remove, not {type(edit).__name__}")
@@ -660,11 +660,12 @@ def remove_data_set(doc, edit, ignore_supervision=True,
             f"DataSet")
     return [edit] + _expand_remove_data_set(
         doc, data_set, exclude_blocks=(), already=(),
-        update_conf_rev=update_conf_rev)
+        update_conf_rev=update_conf_rev,
+        ignore_supervision=ignore_supervision)
 
 
 def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
-                            update_conf_rev) -> List:
+                            update_conf_rev, ignore_supervision=True) -> List:
     """Everything a `DataSet` removal drags with it, apart from the removal.
 
     Shared with A9's :func:`~py61850.scl.remove_control_block`, which removes
@@ -673,6 +674,11 @@ def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
     exists to stop. ``exclude_blocks`` is the control block that removal is
     already taking out, and ``already`` the `ExtRef` elements it has already
     unsubscribed; both are compared by identity.
+
+    ``ignore_supervision`` rides straight through to the `unsubscribe` below.
+    A9 passes ``True`` deliberately: it drives supervision by the block it is
+    removing, which reaches every subscriber this call could, and blanking one
+    `Val` twice in one compound edit is two edits where the document needs one.
     """
     handled = {id(ext_ref) for ext_ref in already}
     excluded = {id(block) for block in exclude_blocks}
@@ -682,7 +688,8 @@ def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
     subscribers = [ext_ref for ext_ref in _subscriptions_to(doc, members)
                    if id(ext_ref) not in handled]
     if subscribers:
-        edits.extend(unsubscribe(doc, subscribers))
+        edits.extend(unsubscribe(doc, subscribers,
+                                 ignore_supervision=ignore_supervision))
 
     for block in control_blocks(doc, data_set):
         if id(block) in excluded:
@@ -721,16 +728,18 @@ def remove_fcda(doc, edits, ignore_supervision=True,
     caller who means that has :func:`remove_data_set` to say so with.
 
     ``ignore_supervision`` and ``update_conf_rev`` behave as
-    :func:`remove_data_set`'s.
+    :func:`remove_data_set`'s, and the supervision half is **almost always
+    nothing**: taking a member away only ends a supervision when it unbinds
+    the last `ExtRef` a subscriber had to that member's control block, and 531
+    of the corpus's 566 (subscriber, control block) pairs carry more than one.
+    That is very likely why the reference does not mention supervision on this
+    function at all, and it is still the right flag to honour -- the 35 pairs
+    with a single `ExtRef` are the case where it is not nothing.
 
     Raises :class:`~py61850.scl.EditRejected` if anything in ``edits`` is not
     a `Remove` of an `FCDA` that sits in a `DataSet`, or if the removals would
     leave a dataset empty.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     # A single edit of any type is wrapped rather than iterated: `list()` on
     # one that is not a `Remove` raises `TypeError`, and a caller who passed
     # the wrong edit deserves the EditRejected below naming what they passed.
@@ -772,7 +781,8 @@ def remove_fcda(doc, edits, ignore_supervision=True,
                        if id(ext_ref) not in handled]
         handled.update(id(ext_ref) for ext_ref in subscribers)
         if subscribers:
-            out.extend(unsubscribe(doc, subscribers))
+            out.extend(unsubscribe(doc, subscribers,
+                                   ignore_supervision=ignore_supervision))
     if update_conf_rev:
         for data_set, _going in affected.values():
             out.extend(updated_conf_rev_edits(doc, data_set))

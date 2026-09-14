@@ -461,21 +461,21 @@ def update_report_control(doc, edit, ignore_supervision=True) -> List:
     4. `RptEnabled@max` reset to ``"1"`` when `indexed` is set to `"false"`,
        which is the reference's documented rule for that attribute.
 
-    ``ignore_supervision`` is carried for the same reason
-    :func:`~py61850.scl.unsubscribe`'s is and refuses `False` the same way,
-    even though a `ReportControl` has no LGOS or LSVS of its own: A14 decides
-    what supervision means for every control block at once, and a function
-    that quietly accepted `False` here would be claiming to have done
-    something.
+    ``ignore_supervision`` is **accepted and does nothing, in either
+    position**, and that is the whole of it. 61850-7-4 defines `LGOS` for a
+    `GSEControl` and `LSVS` for a `SampledValueControl` and no report
+    equivalent, so nothing supervises a `ReportControl` and there is nothing
+    for the flag to switch. It is kept because retiring it from one of the
+    seven would change a published signature for a MINOR release, and because
+    a caller that passes `False` uniformly to every edit check should not have
+    to know which of the seven it means something to. Q32 §9 chose the no-op
+    over a refusal; Q33 says why the test asserts the two calls return the
+    same edits rather than merely that nothing was raised.
 
     Raises :class:`~py61850.scl.EditRejected` if ``edit`` is not a
     `SetAttributes` on a `ReportControl`, if it would clear a required
     attribute, or if the new name is already used in the logical node.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if not isinstance(edit, SetAttributes):
         raise EditRejected(
             "update_report_control takes a SetAttributes, not "

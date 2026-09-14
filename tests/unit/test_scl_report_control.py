@@ -463,17 +463,27 @@ class TestUpdateReportControl(_Base):
                              {"indexed": "false"})
         self.assertEqual(update_report_control(doc, edit), [edit])
 
-    def test_supervision_cannot_be_turned_on(self):
-        """Refused rather than quietly ignored -- the same answer the seven
-        functions that carry the flag give. **And nothing supervises a
-        `ReportControl`**: 61850-7-4 defines `LGOS` for a `GSEControl` and
-        `LSVS` for a `SampledValueControl` and no report equivalent, so this
-        flag has nothing to do in either position; the wiring phase makes
-        `False` an accepted no-op here rather than a refusal."""
-        doc = self.doc()
-        edit = SetAttributes(_named(doc, "ReportControl", "R1"), {"desc": "x"})
-        with self.assertRaisesRegex(EditRejected, "not written yet"):
-            update_report_control(doc, edit, ignore_supervision=False)
+    def test_supervision_is_a_no_op_here_in_either_position(self):
+        """**Nothing supervises a `ReportControl`.** 61850-7-4 defines `LGOS`
+        for a `GSEControl` and `LSVS` for a `SampledValueControl` and no
+        report equivalent, so the flag is vacuous both ways round. It is kept
+        rather than retired because dropping it from one of the seven would
+        change a published signature in a MINOR release, and because a caller
+        that passes `False` uniformly should not have to know which of the
+        seven it means something to. Q32 §9 chose the no-op over a refusal.
+
+        **The assertion is that the two calls return the same edits**, not
+        merely that nothing was raised: the second would keep passing if this
+        function ever grew a supervision fan-out by accident, which is the one
+        way this decision can go wrong later. A rename is used rather than a
+        `desc` change because it is the edit that HAS a fan-out -- the
+        subscriber re-point -- so the comparison has something to be wrong
+        about."""
+        doc = self.doc(_station_with_subscriber())
+        edit = SetAttributes(_named(doc, "ReportControl", "R1"), {"name": "R9"})
+        with_flag = update_report_control(doc, edit, ignore_supervision=False)
+        self.assertEqual(with_flag, update_report_control(doc, edit))
+        self.assertGreater(len(with_flag), 1)
 
     def test_the_wrong_kind_of_edit_is_refused(self):
         doc = self.doc()

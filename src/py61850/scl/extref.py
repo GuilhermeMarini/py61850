@@ -513,26 +513,42 @@ def is_subscribed(doc, fcda, scope) -> bool:
 # -- subscribing ------------------------------------------------------------
 
 def subscribe(doc, connections, force=False, ignore_supervision=True,
-              check_only_btype=False) -> List:
+              check_only_btype=False, new_supervision_ln=False) -> List:
     """The edit that binds each connection, as one compound edit.
 
     ``connections`` is one :class:`Connection` or a list of them. Build them
     together rather than concatenating separate calls -- see the module
-    docstring.
+    docstring, and note that supervision makes that stronger than it was: two
+    connections planned together cannot take the same free `LGOS`, and two
+    planned in separate calls can.
 
     ``force`` skips the restriction checks. ``check_only_btype`` narrows them.
-    ``ignore_supervision`` is here so the signature does not change when
-    LGOS/LSVS supervision arrives: **supervision is not written today**, and
-    passing ``False`` is refused rather than silently ignored.
+
+    ``ignore_supervision=False`` **also instantiates the LGOS/LSVS supervision
+    each connection implies**, through
+    :func:`~py61850.scl.instantiate_supervision`, as part of the same compound
+    edit. A block this subscriber already supervises is left alone -- 548 of
+    the corpus's 566 (subscriber, control block) pairs are in that state -- and
+    a connection naming a `ReportControl`, or no control block at all, has
+    nothing to supervise.
+
+    **The default stays ``True``, where the reference's is ``false``.**
+    Flipping it would change what an existing caller writes into a file, which
+    A18's MINOR rule forbids; Q32 §9 settled it.
+
+    ``new_supervision_ln=True`` lets a subscription that finds no free
+    supervision node build one, exactly as
+    :func:`~py61850.scl.instantiate_supervision` does. It is off by default and
+    is not arrived at silently: 45 of the corpus's 59 (IED, class) blocks hold
+    no free slot at all, so this is the difference between refusing and
+    writing a logical node nobody asked for.
 
     Raises :class:`EditRejected` if a connection fails its restrictions,
-    naming what was expected and what was offered. Nothing is applied by this
-    function, so nothing is left half-done either way.
+    naming what was expected and what was offered, or -- with
+    ``ignore_supervision=False`` -- if a supervision cannot be instantiated,
+    naming what is missing. Nothing is applied by this function, so nothing is
+    left half-done either way.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if isinstance(connections, Connection):
         connections = [connections]
 
@@ -541,6 +557,13 @@ def subscribe(doc, connections, force=False, ignore_supervision=True,
     for connection in connections:
         edits.extend(_subscribe_one(doc, connection, force, check_only_btype,
                                     created_inputs))
+    if not ignore_supervision:
+        # Deferred: `supervision` imports this module for
+        # `source_control_block`, so the dependency runs A14 -> A8 at module
+        # level and back only here. Q25's shape, as A9's call into A10 is.
+        from .supervision import _expand_subscribe_supervision
+        edits.extend(_expand_subscribe_supervision(doc, connections,
+                                                   new_supervision_ln))
     return edits
 
 
@@ -656,15 +679,26 @@ def unsubscribe(doc, ext_refs, ignore_supervision=True) -> List:
     connected to it. One without is removed, and an `Inputs` that its removal
     empties is removed too.
 
-    ``ignore_supervision`` is here for the same reason as `subscribe`'s, and
-    behaves the same way.
+    ``ignore_supervision=False`` **also blanks the supervision whose last
+    `ExtRef` is going**, which is the reference's own rule -- supervision is
+    removed *"when all external references of one control block are
+    unsubscribed"*. It is a question about a SET, not about one element: only
+    35 of the corpus's 566 (subscriber, control block) pairs carry a single
+    `ExtRef` and the busiest block carries 64, so an `ExtRef` this call does
+    not touch keeps the supervision standing. The value is blanked and the
+    logical node kept, which is what
+    :func:`~py61850.scl.remove_supervision` defaults to and the same edit
+    A13's :func:`~py61850.scl.remove_ied` already emits.
+
+    **The default stays ``True``, where the reference's is ``false``** -- Q32
+    §9, as `subscribe`'s.
     """
-    if not ignore_supervision:
-        raise EditRejected(
-            "subscription supervision is not written yet; "
-            "ignore_supervision=False has nothing to turn off")
     if isinstance(ext_refs, ET.Element):
         ext_refs = [ext_refs]
+    # Materialised because the list is now read twice: once to build the
+    # unbinding, once to decide which supervisions that leaves with nothing
+    # subscribed. A caller passing a generator used to work and still does.
+    ext_refs = list(ext_refs)
 
     edits: List = []
     removed = {}
@@ -691,4 +725,12 @@ def unsubscribe(doc, ext_refs, ignore_supervision=True) -> List:
         # is not a leaf however many ExtRefs leave.
         if all(child in gone for child in parent):
             edits.append(Remove(parent))
+
+    if not ignore_supervision:
+        # Deferred for the same reason as `subscribe`'s, and it runs last
+        # because it reads the document as it still stands -- every ExtRef
+        # above is still in the tree, which is exactly what lets it count the
+        # ones that are NOT going.
+        from .supervision import _expand_unsubscribe_supervision
+        edits.extend(_expand_unsubscribe_supervision(doc, ext_refs))
     return edits

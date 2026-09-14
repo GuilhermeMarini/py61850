@@ -677,11 +677,20 @@ class TestRemoveFcda(_Base):
             remove_fcda(doc, Remove(ET.SubElement(self.ln0(doc), "FCDA")))
         self.assertIn("outside a DataSet", str(caught.exception))
 
-    def test_supervision_cannot_be_switched_on_yet(self):
+    def test_asking_for_supervision_is_almost_always_nothing(self):
+        """**And that is very likely why the reference does not mention
+        supervision on this function at all.** Taking a member away only ends
+        a supervision when it unbinds the last `ExtRef` a subscriber had to
+        that member's control block, and 531 of the corpus's 566 (subscriber,
+        control block) pairs carry more than one. Here the dataset keeps its
+        other members and the subscription survives, so `False` and `True`
+        produce the same edit -- asserted as equality rather than as "nothing
+        was raised", which would also pass if the flag grew a fan-out."""
         doc = self.doc()
-        with self.assertRaises(EditRejected):
+        self.assertEqual(
             remove_fcda(doc, Remove(self.members(doc)[0]),
-                        ignore_supervision=False)
+                        ignore_supervision=False),
+            remove_fcda(doc, Remove(self.members(doc)[0])))
 
     def test_it_is_one_history_entry(self):
         doc = self.doc()
@@ -746,9 +755,19 @@ class TestRemoveDataSet(_Base):
                                                {"desc": "x"}))
         with self.assertRaises(EditRejected):
             remove_data_set(doc, Remove(self.ln0(doc)))
-        with self.assertRaises(EditRejected):
+
+    def test_supervision_rides_on_the_unsubscribe_it_performs(self):
+        """**Nothing is owned here.** Removing a dataset does not remove the
+        blocks that published it, so there is no block to sweep by -- only the
+        subscriptions that ended, which step 2's `unsubscribe` already knows
+        about. `False` therefore reaches supervision through that call and
+        through nothing else, which is the one expansion Q25 asks for rather
+        than a second one shaped differently."""
+        doc = self.doc()
+        self.assertEqual(
             remove_data_set(doc, Remove(_named(doc, "DataSet", "DS1")),
-                            ignore_supervision=False)
+                            ignore_supervision=False),
+            remove_data_set(doc, Remove(_named(doc, "DataSet", "DS1"))))
 
     def test_it_is_one_history_entry(self):
         doc = self.doc()

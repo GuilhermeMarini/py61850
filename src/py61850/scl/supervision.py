@@ -146,21 +146,54 @@ cannot collide. Corpus `inst` values run 1 to 31 and are not dense: 26 of the
 than appending. **Allocation policy is A17's**, and this is the provisional
 rule its phase takes over; ``fixed_ln_inst`` overrides it.
 
-## What this module does NOT do yet
+## What the seven flags reach, and what each `False` means
 
-**Nothing calls it.** The seven functions carrying `ignore_supervision` still
-refuse ``False`` -- :func:`~py61850.scl.subscribe`,
-:func:`~py61850.scl.unsubscribe`,
-:func:`~py61850.scl.remove_control_block`,
-:func:`~py61850.scl.remove_data_set`, :func:`~py61850.scl.remove_fcda`,
-:func:`~py61850.scl.update_report_control` and
-:func:`~py61850.scl.update_sampled_value_control`, which is **seven and not
-the six four places used to say.** Wiring them is the second half of this
-phase, deliberately separated: it changes merged behaviour in five modules
-that already ship and are already tested, and landing that beside a new module
-would make any breakage ambiguous about its cause.
+**Seven functions carry `ignore_supervision`, not the six four places used to
+say**, and since A14b six of them do the work when asked. The default stays
+``True`` on all seven: flipping it to the reference's ``false`` would change
+what ``subscribe(doc, conn)`` writes into a file for every existing caller,
+which is the meaning-change A18's MINOR rule forbids. Q32 §9 settled that and
+it is not re-argued here.
 
-**And there is no batch driver.** The reference has two --
+=====================================  ====================================
+function                               what ``ignore_supervision=False`` does
+=====================================  ====================================
+:func:`~py61850.scl.subscribe`         instantiates the supervision each
+                                       connection implies, skipping the
+                                       already-supervised and refusing what
+                                       cannot be supervised
+:func:`~py61850.scl.unsubscribe`       blanks the supervision whose LAST
+                                       `ExtRef` in that subscriber is going
+:func:`~py61850.scl.remove_control_block`  blanks every supervision naming
+                                       the block being removed
+:func:`~py61850.scl.remove_data_set`   through the `unsubscribe` it performs
+:func:`~py61850.scl.remove_fcda`       through the `unsubscribe` it performs,
+                                       and almost always nothing: a member
+                                       only empties a pair when it unbinds
+                                       that pair's last `ExtRef`, and 531 of
+                                       566 pairs have more than one
+:func:`~py61850.scl.update_sampled_value_control`  re-points every `SvCBRef`
+                                       naming the block, when `name` changes
+:func:`~py61850.scl.update_report_control`  **nothing, and that is not an
+                                       oversight** -- 61850-7-4 defines no
+                                       report equivalent of `LGOS`, so the
+                                       flag is vacuous in both positions and
+                                       ``False`` is a documented no-op rather
+                                       than a refusal
+=====================================  ====================================
+
+**Three expansions, in this module, and the other five modules call them.**
+That is Q25's shape -- one expansion owned in one place, with a deferred
+import for the back-edge -- and the reason is the one Q25 gives: two paths
+that end one subscription differently is drift nobody notices until a file is
+wrong. `_expand_subscribe_supervision` and `_expand_unsubscribe_supervision`
+are the two halves the flags reach; `_expand_control_block_supervision` is the
+third, and it answers *this block is gone* rather than *this subscription
+ended* -- the sweep A13's :func:`~py61850.scl.remove_ied` already performs, so
+that removing an IED and removing one of its control blocks cannot leave
+different supervision behind.
+
+**There is still no batch driver.** The reference has two --
 `insertSubscriptionSupervisions`, driven by an array of subscribe edits, and
 `removeSubscriptionSupervision`, driven by an array of `ExtRef` elements --
 because its API is edit-in, edit-out: the `ExtRef` inside an unapplied
@@ -169,8 +202,17 @@ looked up from a record of six strings, which is what
 `findControlBlockBySrcAttributes` exists for. **Ours never has that problem**:
 :class:`~py61850.scl.Connection` carries the control block as an element,
 before anything is applied. So the driver and the record lookup are machinery
-for a constraint this library does not have, and the wiring half puts the work
-inline instead. See Q32.
+for a constraint this library does not have, and the wiring does the work
+inline. See Q32.
+
+**What a compound edit cannot see, :class:`_Batch` remembers.** Every question
+here is asked of the document, and inside one `subscribe` call the document is
+out of date until the caller applies the whole list -- so two supervisions
+planned together would take the same free slot, allocate the same `inst` and
+spend the same last place under a `Services` limit. 8 of the corpus's 59
+(IED, class) blocks hold exactly one free slot. The reference keeps a
+`usedSupervisions` set for this and :func:`~py61850.scl.subscribe` already
+keeps `created_inputs` for the identical hazard one level down. Q33.
 """
 
 from __future__ import annotations
@@ -187,6 +229,7 @@ from .control_block import (
 from .data_set import _limit, _services_child
 from .document import strip_ns
 from .edit import EditRejected, Insert, Remove, SetTextContent
+from .extref import source_control_block
 from .ordering import reference_for
 
 #: The logical node classes that supervise a subscription. `tLN@lnClass` is an
@@ -381,12 +424,16 @@ def _supervised_reference(doc, supervision_ln) -> str:
     return (val.text or "").strip()
 
 
-def _supervision_values(doc):
+def _supervision_values(doc, do_names=SUPERVISION_REFERENCE_DOS):
     """Every `Val` holding a supervision object reference, with its text.
 
     Yields ``(val, text)``. Used by :mod:`py61850.scl.ied` for the rename and
-    removal sweeps; it looks at all of :data:`SUPERVISION_REFERENCE_DOS`,
-    where the rest of this module only ever wants the control-block one.
+    removal sweeps, which want all of :data:`SUPERVISION_REFERENCE_DOS`, and
+    by :func:`_repoint_supervision` here, which narrows ``do_names`` to the
+    one data object that can hold the reference being re-pointed. Narrowing
+    matters: a `DataSet` and a control block named alike in one logical node
+    build the same object reference, and re-pointing a control block must not
+    follow a `DatSet` value that happens to read the same.
     """
     namespace = _namespace(doc.root.tag)
     dai_tag, val_tag = namespace + "DAI", namespace + "Val"
@@ -395,7 +442,7 @@ def _supervision_values(doc):
             continue
         for doi in node:
             if (doi.tag != namespace + "DOI"
-                    or doi.get("name") not in SUPERVISION_REFERENCE_DOS):
+                    or doi.get("name") not in do_names):
                 continue
             for dai in doi.iter(dai_tag):
                 if dai.get("name") != "setSrcRef":
@@ -403,6 +450,30 @@ def _supervision_values(doc):
                 for val in dai:
                     if val.tag == val_tag:
                         yield val, (val.text or "").strip()
+
+
+def _retext(element, text: Optional[str]) -> SetTextContent:
+    """A :class:`~py61850.scl.SetTextContent` that keeps the element's own
+    leading and trailing whitespace.
+
+    An object reference and an `IEDName` are both types derived from
+    ``xs:normalizedString``, so no corpus file indents one -- but a file that
+    did would otherwise have its indentation eaten by a rename, and the round
+    trip is what this project measures itself on.
+
+    **It lives here because three call sites now write a supervision value's
+    text** -- A13's IED rename, this module's instantiation and this module's
+    re-point -- and two of them disagreeing about whitespace is the drift Q25
+    and Q23 were written about. A13 wrote it in :mod:`py61850.scl.ied`, which
+    imports this module; moving it down is the direction the import graph
+    already runs.
+    """
+    raw = element.text or ""
+    if text is None:
+        return SetTextContent(element, None)
+    lead = raw[:len(raw) - len(raw.lstrip())]
+    trail = raw[len(raw.rstrip()):]
+    return SetTextContent(element, lead + text + trail)
 
 
 # -- may an SCL tool write it -----------------------------------------------
@@ -549,22 +620,57 @@ class _Plan(NamedTuple):
     inst: Optional[str]
 
 
+class _Batch:
+    """What one compound edit has already spoken for.
+
+    **Every question this module asks is asked of the document, and inside one
+    compound edit the document is out of date** -- nothing is applied until the
+    caller applies the whole list. So two supervisions planned in one call see
+    the same free slot, allocate the same `inst`, and count the same bound
+    references against the same `Services` limit. Without this record the
+    second `SetTextContent` would overwrite the first on one `Val` and one of
+    the two supervisions would be lost with no error anywhere.
+
+    It is the same hazard :func:`~py61850.scl.subscribe` already keeps
+    ``created_inputs`` for one level down -- two connections into one logical
+    node must share one `Inputs` -- and the reference keeps its own
+    ``usedSupervisions`` set for exactly this. Measured, it is not an edge: 8
+    of the corpus's 59 (IED, class) blocks hold exactly one free slot, and one
+    IED subscribes to 33 distinct control blocks.
+
+    ``None`` everywhere means "not in a batch", which is what a single
+    :func:`instantiate_supervision` call is, and then nothing is recorded.
+    """
+
+    __slots__ = ("nodes", "insts", "bound")
+
+    def __init__(self):
+        self.nodes = set()      # id() of supervision LNs this call has filled
+        self.insts = {}         # id(LDevice) -> the inst strings it has taken
+        self.bound = {}         # (id(scope), ln_class) -> references it added
+
+
 def _ied_of(doc, element):
     if _is(element, "IED"):
         return element
     return _ancestor(doc, element, "IED")
 
 
-def _free_inst(doc, parent, ln_class, fixed_ln_inst) -> str:
+def _free_inst(doc, parent, ln_class, fixed_ln_inst, batch=None) -> str:
     """An unused `inst` for a new logical node of ``ln_class`` in ``parent``.
 
     Scanned by `lnClass` alone -- `prefix` is ignored, so the answer can never
     collide with an existing node whatever prefix it carries. The module
     docstring says why that is deliberate rather than lazy, and that
     allocation policy belongs to a later phase.
+
+    ``batch`` adds the instances an unapplied compound edit has already taken,
+    which the document cannot show; see :class:`_Batch`.
     """
     used = {node.get("inst") for node in _same_ns_children(parent, "LN")
             if node.get("lnClass") == ln_class}
+    if batch is not None:
+        used |= batch.insts.get(id(parent), set())
     if fixed_ln_inst is not None:
         inst = str(fixed_ln_inst)
         if inst in used:
@@ -585,12 +691,19 @@ def _free_inst(doc, parent, ln_class, fixed_ln_inst) -> str:
 
 def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,
           ln_type, parent, check_editable_src_ref,
-          check_duplicate_supervisions, check_max_supervision_limits) -> _Plan:
+          check_duplicate_supervisions, check_max_supervision_limits,
+          batch=None) -> _Plan:
     """Everything both public functions need, resolved once.
 
     The guard and the builder share it so they cannot disagree, which is the
     drift Q23 and Q25 were written to stop: ``can_instantiate_supervision`` is
     this function returning without raising.
+
+    ``batch`` is the record of what an unapplied compound edit has already
+    spoken for; it is read by every placement decision below and written once,
+    at the end, only when a plan was actually reached. A refusal records
+    nothing, which is what keeps a rejected edit from changing the answer to
+    the next question.
     """
     if not isinstance(supervision, Supervision):
         raise EditRejected(
@@ -622,8 +735,7 @@ def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,
             f"needs a name and must be inside an IED")
 
     if check_duplicate_supervisions:
-        already = next((node for node in _supervision_lns(doc, subscriber, ln_class)
-                        if _supervised_reference(doc, node) == obj_ref), None)
+        already = _watching(doc, subscriber, ln_class, obj_ref)
         if already is not None:
             raise EditRejected(
                 f"IED {subscriber.get('name')!r} already supervises "
@@ -631,11 +743,12 @@ def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,
                 f"{ln_class}{already.get('inst')}")
 
     if supervision_ln is not None:
-        target = _resolve_named_ln(doc, subscriber, supervision_ln, ln_class)
+        target = _resolve_named_ln(doc, subscriber, supervision_ln, ln_class,
+                                   batch)
     elif new_supervision_ln:
         target = None
     else:
-        target = _first_free(doc, subscriber, ln_class)
+        target = _first_free(doc, subscriber, ln_class, batch)
         if target is None:
             # Deliberately NOT a silent fallback to creating one. "Fill in a
             # free slot" and "add a logical node to this IED" are different
@@ -660,15 +773,23 @@ def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,
     else:
         plan = _new_node_plan(doc, subscriber, ln_class, obj_ref,
                               fixed_ln_inst, ln_type, parent,
-                              check_editable_src_ref)
+                              check_editable_src_ref, batch)
         scope_element = plan.parent
 
-    if check_max_supervision_limits:
-        _check_limit(doc, subscriber, scope_element, ln_class)
+    owner = _check_limit(doc, subscriber, scope_element, ln_class, batch,
+                         check_max_supervision_limits)
+    if batch is not None:
+        if plan.supervision_ln is not None:
+            batch.nodes.add(id(plan.supervision_ln))
+        else:
+            batch.insts.setdefault(id(plan.parent), set()).add(plan.inst)
+        key = (id(owner if owner is not None else subscriber), ln_class)
+        batch.bound[key] = batch.bound.get(key, 0) + 1
     return plan
 
 
-def _check_limit(doc, subscriber, scope_element, ln_class):
+def _check_limit(doc, subscriber, scope_element, ln_class, batch=None,
+                 enforce=True):
     """Refuse when the `SupSubscription` governing this placement is full.
 
     The declaration is resolved from the element the new reference will be
@@ -677,25 +798,41 @@ def _check_limit(doc, subscriber, scope_element, ln_class):
     scope that declared it, which is Q26 §2's rule for `ConfDataSet@max`
     applied unchanged. No corpus file exercises either half: all 51
     declarations are IED-level.
+
+    Returns the element the count is taken in, so :func:`_plan` can record a
+    pending reference against the same scope the next call will count it in.
+    The scope is resolved even when there is no limit and even when
+    ``enforce`` is off, because the record is kept either way: a batch that
+    turns the check off still fills slots, and the next question still has to
+    get a consistent answer.
     """
-    limit = max_supervision(doc, scope_element)
-    if limit is None:
-        return
-    declared = limit.max_go if ln_class == "LGOS" else limit.max_sv
-    if declared is None:
-        return
     found = _services_child(doc, scope_element, "SupSubscription")
     owner = found[2] if found is not None else subscriber
+    if not enforce:
+        return owner
+    limit = max_supervision(doc, scope_element)
+    if limit is None:
+        return owner
+    declared = limit.max_go if ln_class == "LGOS" else limit.max_sv
+    if declared is None:
+        return owner
     bound = _bound_supervisions(doc, owner, ln_class)
+    if batch is not None:
+        # What this compound edit has already promised to bind, which the
+        # document cannot show: nothing is applied until the caller applies
+        # the whole list. Without it a batch of two would take the last free
+        # slot twice and write a file that breaks its own declaration.
+        bound += batch.bound.get((id(owner), ln_class), 0)
     if bound >= declared:
         raise EditRejected(
             f"IED {subscriber.get('name')!r} already supervises {bound} "
             f"control block(s) with {ln_class}, which is the maximum its "
             f"{limit.scope} SupSubscription declares "
             f"({_LIMIT_ATTRIBUTE[ln_class]}={declared})")
+    return owner
 
 
-def _resolve_named_ln(doc, subscriber, supervision_ln, ln_class):
+def _resolve_named_ln(doc, subscriber, supervision_ln, ln_class, batch=None):
     """The caller's own node, checked -- the reference's union half."""
     if not _is_supervision_ln(supervision_ln):
         raise EditRejected(
@@ -715,18 +852,41 @@ def _resolve_named_ln(doc, subscriber, supervision_ln, ln_class):
         raise EditRejected(
             f"{supervision_ln.get('prefix') or ''}{ln_class}"
             f"{supervision_ln.get('inst')} already supervises {existing}")
+    if batch is not None and id(supervision_ln) in batch.nodes:
+        raise EditRejected(
+            f"{supervision_ln.get('prefix') or ''}{ln_class}"
+            f"{supervision_ln.get('inst')} is already being given a reference "
+            f"by an earlier part of this same edit")
     return supervision_ln
 
 
-def _first_free(doc, subscriber, ln_class):
+def _watching(doc, subscriber, ln_class, obj_ref):
+    """The supervision node inside ``subscriber`` already watching
+    ``obj_ref``, or ``None``.
+
+    One function for one question, because three callers ask it and they must
+    agree: :func:`_plan`'s duplicate refusal, the subscribe wiring's decision
+    to leave an already-supervised block alone -- 548 of the corpus's 566
+    pairs -- and the unsubscribe wiring's search for the node whose
+    subscription has just ended.
+    """
+    return next((node for node in _supervision_lns(doc, subscriber, ln_class)
+                 if _supervised_reference(doc, node) == obj_ref), None)
+
+
+def _first_free(doc, subscriber, ln_class, batch=None):
     """The lowest-numbered supervision node of this class watching nothing.
 
     ``None`` when every one is taken, which is what sends the caller to
     ``new_supervision_ln=True``. Free covers all four shapes the module
     docstring tabulates, the Siemens empty `DOI` included.
+
+    ``batch`` removes the nodes an unapplied compound edit has already filled;
+    see :class:`_Batch`.
     """
     free = [node for node in _supervision_lns(doc, subscriber, ln_class)
-            if not _supervised_reference(doc, node)]
+            if not _supervised_reference(doc, node)
+            and (batch is None or id(node) not in batch.nodes)]
     if not free:
         return None
 
@@ -738,7 +898,7 @@ def _first_free(doc, subscriber, ln_class):
 
 
 def _new_node_plan(doc, subscriber, ln_class, obj_ref, fixed_ln_inst, ln_type,
-                   parent, check_editable_src_ref):
+                   parent, check_editable_src_ref, batch=None):
     """Parent, `lnType` and `inst` for a logical node that does not exist."""
     sibling = next(iter(_supervision_lns(doc, subscriber, ln_class)), None)
 
@@ -781,7 +941,7 @@ def _new_node_plan(doc, subscriber, ln_class, obj_ref, fixed_ln_inst, ln_type,
                 f"configuration tool (valKind={kind!r}, valImport={imp!r}); "
                 f"pass check_editable_src_ref=False to write it anyway")
 
-    inst = _free_inst(doc, parent, ln_class, fixed_ln_inst)
+    inst = _free_inst(doc, parent, ln_class, fixed_ln_inst, batch)
     return _Plan(ln_class, obj_ref, None, parent, ln_type, inst)
 
 
@@ -848,6 +1008,18 @@ def instantiate_supervision(doc, supervision, supervision_ln=None,
     plan = _plan(doc, supervision, supervision_ln, new_supervision_ln,
                  fixed_ln_inst, ln_type, parent, check_editable_src_ref,
                  check_duplicate_supervisions, check_max_supervision_limits)
+    return _instantiate_edits(doc, plan)
+
+
+def _instantiate_edits(doc, plan) -> List:
+    """The edits a resolved :class:`_Plan` turns into.
+
+    Split from :func:`instantiate_supervision` so the wiring in
+    :func:`_expand_subscribe_supervision` reaches the same builder through the
+    same :func:`_plan`, rather than growing a second one -- the drift Q23 and
+    Q25 exist to stop, arriving here because a batch needs to pass a
+    :class:`_Batch` the public signature deliberately does not carry.
+    """
     obj_ref = plan.obj_ref
 
     if plan.supervision_ln is None:
@@ -998,3 +1170,243 @@ def remove_supervision(doc, supervision_ln, remove_supervision_ln=False,
     if val is None or not (val.text or "").strip():
         return []
     return [SetTextContent(val, None)]
+
+
+# -- the wiring -------------------------------------------------------------
+#
+# What the seven `ignore_supervision` flags reach. Every one of these is
+# private: A14b adds no capability and no name to `py61850.scl.__all__`. The
+# public surface of this phase is the behaviour of six functions in five other
+# modules when `False` is passed, and those modules import from here the way
+# A9 imports `_expand_remove_data_set` from A10 -- Q25's shape, one expansion
+# in one module, with a deferred import for the back-edge.
+
+def _source_key(ext_ref):
+    """The `src*` attributes that identify which control block an `ExtRef`
+    takes its data from.
+
+    Grouping by it is what keeps the unsubscribe expansion at one document
+    walk per distinct control block instead of one per `ExtRef`. It matters:
+    the busiest corpus block carries 64 `ExtRef` elements, and
+    :func:`~py61850.scl.source_control_block` walks every IED to resolve one.
+    """
+    return (ext_ref.get("iedName"), ext_ref.get("srcLDInst"),
+            ext_ref.get("srcPrefix"), ext_ref.get("srcLNClass"),
+            ext_ref.get("srcLNInst"), ext_ref.get("srcCBName"))
+
+
+def _expand_subscribe_supervision(doc, connections, new_supervision_ln) -> List:
+    """The supervision each connection implies, as edits.
+
+    Reached by :func:`~py61850.scl.subscribe` when `ignore_supervision` is
+    `False`. Three things decide the shape, and each was measured:
+
+    - **An already-supervised block is skipped, not refused.** 548 of the
+      corpus's 566 (subscriber, control block) pairs are already supervised,
+      so the duplicate is the ordinary case here; :func:`_plan`'s own
+      duplicate check would refuse it, which is right for a caller asking for
+      one supervision and wrong for a caller asking to subscribe.
+    - **A `ReportControl` produces nothing.** 61850-7-4 defines `LGOS` for a
+      `GSEControl` and `LSVS` for a `SampledValueControl` and no report
+      equivalent, and a connection naming no control block at all -- Edition 1
+      subscription -- has nothing to supervise either.
+    - **What cannot be supervised refuses the whole edit.** The reference
+      appends a `null` and subscribes anyway, which it can afford because its
+      own default writes supervision: refusing there would break every
+      ordinary `subscribe`. Ours defaults to `True`, so `False` is an explicit
+      opt-in, and an opt-in that silently does nothing cannot be found out
+      about. Measured, silence would be the answer 16 times out of 16: every
+      unsupervised subscription in the corpus is on one of the seven IEDs that
+      hold no supervision node at all, where a new one needs an `lnType` only
+      `importLNodeType` can supply. Q32 and Q33.
+    """
+    batch = _Batch()
+    edits: List = []
+    seen = set()
+    for connection in connections:
+        block = getattr(connection, "control_block", None)
+        if block is None:
+            continue
+        ln_class = supervision_ln_class(block)
+        if ln_class is None:
+            continue
+        subscriber = _ied_of(doc, connection.sink)
+        if subscriber is None:
+            raise EditRejected(
+                f"{_describe(connection.sink)} is not inside an IED of this "
+                f"document, so there is nothing to supervise "
+                f"{strip_ns(block.tag)} {block.get('name')!r} from; pass "
+                f"ignore_supervision=True to subscribe without supervision")
+        obj_ref = control_block_obj_ref(doc, block)
+        if not obj_ref:
+            raise EditRejected(
+                f"{strip_ns(block.tag)} {block.get('name')!r} has no object "
+                f"reference to supervise; it needs a name and must be inside "
+                f"an IED")
+        key = (id(subscriber), obj_ref)
+        if key in seen:
+            # Two ExtRefs of one IED bound to one control block are one
+            # subscription to supervise, not two. 531 of 566 corpus pairs
+            # carry more than one ExtRef, so this is the common shape.
+            continue
+        seen.add(key)
+        if _watching(doc, subscriber, ln_class, obj_ref) is not None:
+            continue
+        plan = _plan(doc, Supervision(subscriber, block), None,
+                     new_supervision_ln, None, None, None,
+                     True, True, True, batch)
+        edits.extend(_instantiate_edits(doc, plan))
+    return edits
+
+
+def _expand_unsubscribe_supervision(doc, ext_refs) -> List:
+    """The supervision the removal of these `ExtRef` elements ends, as edits.
+
+    Reached by :func:`~py61850.scl.unsubscribe` when `ignore_supervision` is
+    `False`, and through it by `remove_data_set` and `remove_fcda`.
+
+    **The rule is the reference's, and it is a question about a SET.**
+    Supervision goes *"when all external references of one control block are
+    unsubscribed"* -- so the ExtRefs of that block in that subscriber which
+    this call does NOT touch are what decide it. Only 35 of the corpus's 566
+    pairs carry a single `ExtRef` and the busiest block carries 64, so judging
+    one call at a time would make the answer depend on the order the caller
+    happened to ask in. That is Q27's argument for `remove_fcda`'s list,
+    arriving at `unsubscribe`.
+
+    **The value is blanked and the logical node kept**, because that is what
+    :func:`remove_supervision` defaults to and what A13's
+    :func:`~py61850.scl.remove_ied` already emits -- the same primitive on the
+    same element, so the three paths cannot drift. Two unrelated vendors write
+    an idle supervision node rather than deleting one, 49 times between them.
+
+    **`valKind`/`valImport` are not read here**, which is what
+    :func:`remove_supervision` already decided by omission: blanking is the
+    same edit A13 makes without asking, and under this package's permissive
+    reading :func:`is_src_ref_editable` answers `True` for all 600 corpus
+    nodes anyway. The strict reading would leave 170 bound supervisions
+    watching a subscription that no longer exists. Q33.
+    """
+    # **Everything this call unbinds, counted once for the whole call.**
+    # Grouping the departures per source key would under-count them: `_same`
+    # treats an absent attribute and an empty one as the same value, so two
+    # ExtRefs bound to one control block can carry different `srcPrefix` or
+    # `srcLNInst` spellings and land in two groups. Each group would then see
+    # the other's departures as ExtRefs that are staying, and a supervision
+    # whose every subscription was going would be left standing.
+    leaving = {id(ext_ref) for ext_ref in ext_refs}
+
+    groups: dict = {}
+    for ext_ref in ext_refs:
+        if ext_ref.get("srcCBName"):
+            groups.setdefault(_source_key(ext_ref), []).append(ext_ref)
+
+    edits: List = []
+    done = set()
+    handled = set()
+    for group in groups.values():
+        block = source_control_block(doc, group[0])
+        if block is None or id(block) in handled:
+            # Two groups can resolve to one block, for the spelling reason
+            # above. The departures are already counted across the whole
+            # call, so the second group would only repeat the walk.
+            continue
+        handled.add(id(block))
+        ln_class = supervision_ln_class(block)
+        obj_ref = control_block_obj_ref(doc, block) if ln_class else None
+        if not obj_ref:
+            continue
+
+        # One document walk for the block, then split by subscriber: an
+        # ExtRef in another IED says nothing about this one's supervision.
+        staying: dict = {}
+        for ext_ref in find_control_block_subscription(doc, block):
+            ied = _ied_of(doc, ext_ref)
+            if ied is None:
+                continue
+            staying.setdefault(id(ied), [ied, 0])
+            if id(ext_ref) not in leaving:
+                staying[id(ied)][1] += 1
+
+        for ied, remaining in staying.values():
+            if remaining:
+                continue
+            node = _watching(doc, ied, ln_class, obj_ref)
+            if node is None or id(node) in done:
+                continue
+            done.add(id(node))
+            # `check_subscription=False` is required, not a shortcut: nothing
+            # in this compound edit is applied yet, so the ExtRefs going away
+            # are all still in the document and the guard would refuse the
+            # very removal their departure calls for.
+            edits.extend(remove_supervision(doc, node,
+                                            check_subscription=False))
+    return edits
+
+
+def _expand_control_block_supervision(doc, control_block) -> List:
+    """Every supervision value naming ``control_block``, blanked.
+
+    Reached by :func:`~py61850.scl.remove_control_block` when
+    `ignore_supervision` is `False`, and it answers a different question from
+    the one above: *this block is gone*, rather than *this subscription
+    ended*. A13's :func:`~py61850.scl.remove_ied` already sweeps exactly this
+    way, unconditionally, for the blocks inside a removed IED -- so without it
+    removing an IED would blank a supervision that removing one of its control
+    blocks left standing, which is one defect with two answers.
+
+    **It is a superset of what the unsubscribe path produces for this block,
+    and on the corpus it is the same set**: every one of the 566 supervised
+    pairs also subscribes, and 0 supervisions survive without a subscription.
+    So `remove_control_block` takes this route alone and passes
+    `ignore_supervision=True` to the `unsubscribe` inside it, and no `Val` is
+    blanked twice.
+
+    This is a divergence: the reference's driver is
+    `removeSubscriptionSupervision(extRefs)` and is `ExtRef`-driven with no
+    block-driven equivalent. Q21 and Q29 took the same decision -- chase the
+    dangling reference the reference does not document -- and Q33 records it.
+    """
+    ln_class = supervision_ln_class(control_block)
+    if ln_class is None:
+        return []
+    obj_ref = control_block_obj_ref(doc, control_block)
+    if not obj_ref:
+        return []
+    return [SetTextContent(val, None)
+            for val, text in _supervision_values(doc, (_REFERENCE_DO[ln_class],))
+            if text == obj_ref]
+
+
+def _repoint_supervision(doc, control_block, new_name) -> List:
+    """Every supervision value naming ``control_block``, re-pointed at its new
+    name.
+
+    Reached by :func:`~py61850.scl.update_sampled_value_control` when `name`
+    changes and `ignore_supervision` is `False` -- the half of *"name: also
+    updates SMV.cbName and supervision references"* that A12 could not write.
+
+    **Matched exactly, not decomposed.** A13 resolves an IED rename through
+    :func:`~py61850.scl.ied._object_reference_index` because a name is a
+    PREFIX of many references and two IEDs can build the same one; a control
+    block rename has a single exact string, which
+    :func:`~py61850.scl.control_block_obj_ref` hands over before the edit
+    applies. So the index is neither reused, moved nor duplicated: it answers
+    a question this does not ask.
+
+    The `DOI` is narrowed to the one this class keeps its reference in, so a
+    `DatSet` value that happens to read the same -- which a `DataSet` and a
+    control block named alike in one logical node would produce -- is left
+    alone.
+    """
+    ln_class = supervision_ln_class(control_block)
+    if ln_class is None:
+        return []
+    old = control_block_obj_ref(doc, control_block)
+    suffix = "." + (control_block.get("name") or "")
+    if not old or not old.endswith(suffix):
+        return []
+    wanted = old[:-len(suffix)] + "." + new_name
+    return [_retext(val, wanted)
+            for val, text in _supervision_values(doc, (_REFERENCE_DO[ln_class],))
+            if text == old]
