@@ -63,6 +63,10 @@ class TestSurface(unittest.TestCase):
             "connected_ap_for",
             "update_ied", "remove_ied", "IED_NAME_ELEMENTS", "ORPHAN_IED_NAME",
             "SUPERVISION_LN_CLASSES", "SUPERVISION_REFERENCE_DOS",
+            "Supervision", "MaxSupervision", "supervision_ln_class",
+            "max_supervision", "is_src_ref_editable",
+            "can_instantiate_supervision", "instantiate_supervision",
+            "can_remove_supervision", "remove_supervision", "LN_INST_RANGE",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
