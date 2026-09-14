@@ -180,18 +180,29 @@ reference leaves them: an `LNodeType` no instance uses is ordinary, and 114
 `DataSet` elements in one corpus file are already referenced by nothing.
 
 **`ignore_supervision` is not a parameter here**, which is a deliberate break
-from the **seven** functions that carry it and refuse `False` --
-`subscribe`, `unsubscribe`, `remove_control_block`, `remove_data_set`,
-`remove_fcda`, `update_report_control` and `update_sampled_value_control`, a
-count four places in this package's prose used to give as six. Those refuse
-because they would have to CREATE or RE-POINT supervision, and instantiating
-an `LGOS` needs the `canInstantiate` rules, the `Services` checks and the
-instance allocation that live in :mod:`py61850.scl.supervision`. A removal
-needs none of it: the
-publisher is gone, so every supervision of it is stale, and blanking a setting
-value is the whole operation. There is nothing here to ignore, so there is no
-flag to ignore it with, and a caller is not asked to promise something the
-function does not do.
+from the **seven** functions that carry it -- `subscribe`, `unsubscribe`,
+`remove_control_block`, `remove_data_set`, `remove_fcda`,
+`update_report_control` and `update_sampled_value_control`, a count four
+places in this package's prose used to give as six.
+
+Those seven have something to switch off because they CREATE or RE-POINT
+supervision, and instantiating an `LGOS` needs the `canInstantiate` rules, the
+`Services` checks and the instance allocation that live in
+:mod:`py61850.scl.supervision`. A removal needs none of it: the publisher is
+gone, so every supervision of it is stale, and blanking a setting value is the
+whole operation. There is nothing here to ignore, so there is no flag to
+ignore it with, and a caller is not asked to promise something the function
+does not do.
+
+**This argument is older than the behaviour it describes, and it survived the
+change.** Until A14b the seven REFUSED `False` outright, and the break was
+between a function that refused and one that did not ask; now six of them do
+the work and `update_report_control` accepts `False` as a no-op, and the break
+is between a function that has a choice to offer and one that does not.
+`remove_ied` was right to take no flag either way -- Q32 §8 argued it from 49
+idle supervision nodes across two vendors before the wiring existed, and
+`remove_supervision`'s default still produces exactly the edit step 6 below
+produces, so the two paths cannot drift.
 
 **Blanked, not deleted, and two vendors' files say so.** `sel.scd` carries
 **24 `LGOS` whose `GoCBRef` is already empty** -- the shape its tool writes
