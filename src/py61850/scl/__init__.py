@@ -101,6 +101,16 @@ from .control_block import (
     update_dat_set,
     updated_conf_rev,
 )
+from .data_types import (
+    DATA_TYPE_TAGS,
+    ON_CONFLICT,
+    TypeImport,
+    import_lnode_types,
+    lnode_type_conflicts,
+    remove_data_type,
+    same_data_type,
+    update_lnode_type,
+)
 from .data_set import (
     MaxAttributes,
     can_add_data_set,
@@ -238,4 +248,7 @@ __all__ = [
     "max_supervision", "is_src_ref_editable",
     "can_instantiate_supervision", "instantiate_supervision",
     "can_remove_supervision", "remove_supervision", "LN_INST_RANGE",
+    "same_data_type", "lnode_type_conflicts", "TypeImport",
+    "import_lnode_types", "update_lnode_type", "remove_data_type",
+    "DATA_TYPE_TAGS", "ON_CONFLICT",
 ]
