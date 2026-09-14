@@ -154,7 +154,7 @@ detail; `updateIED` promises *"all control block object references pointing to
 the IED"* and says nothing about how they are found, and its one option --
 `checkPermission` -- exists to gate exactly this rewrite. See Q31.
 
-## What a removal repairs, and the one half it leaves to A14
+## What a removal repairs, and the half of supervision it does
 
 `Remove(ied)` takes the whole IED subtree, so everything INSIDE it -- its
 `ExtRef` elements, its datasets, its control blocks, its own supervision
@@ -180,22 +180,34 @@ reference leaves them: an `LNodeType` no instance uses is ordinary, and 114
 `DataSet` elements in one corpus file are already referenced by nothing.
 
 **`ignore_supervision` is not a parameter here**, which is a deliberate break
-from the six functions that carry it and refuse `False`. Those refuse because
-they would have to CREATE or RE-POINT supervision, and instantiating an
-`LGOS` needs the `canInstantiate` rules, the `Services` checks and the
-instance allocation that belong with `tLN`. A removal needs none of it: the
+from the **seven** functions that carry it and refuse `False` --
+`subscribe`, `unsubscribe`, `remove_control_block`, `remove_data_set`,
+`remove_fcda`, `update_report_control` and `update_sampled_value_control`, a
+count four places in this package's prose used to give as six. Those refuse
+because they would have to CREATE or RE-POINT supervision, and instantiating
+an `LGOS` needs the `canInstantiate` rules, the `Services` checks and the
+instance allocation that live in :mod:`py61850.scl.supervision`. A removal
+needs none of it: the
 publisher is gone, so every supervision of it is stale, and blanking a setting
 value is the whole operation. There is nothing here to ignore, so there is no
 flag to ignore it with, and a caller is not asked to promise something the
 function does not do.
 
-**Blanked, not deleted, and the vendor's own file is why.** `sel.scd` carries
+**Blanked, not deleted, and two vendors' files say so.** `sel.scd` carries
 **24 `LGOS` whose `GoCBRef` is already empty** -- the shape its tool writes
 for a supervision logical node that is allocated and not yet pointed at
-anything, with `setSrcRef` present and its `Val` carrying no text. Blanking
-produces exactly that shape. Removing the `LGOS` instead would renumber the
-`inst` attributes of the ones after it, which other things in the file may
-name, to gain nothing the file does not already demonstrate is normal.
+anything, with `setSrcRef` present and its `Val` carrying no text -- and
+`siemens.scd` carries **25 more** written a different way, with the `DOI`
+present and no `DAI` under it at all. Blanking produces the first shape
+exactly. Removing the `LGOS` instead would renumber the `inst` attributes of
+the ones after it, which other things in the file may name, to gain nothing
+two unrelated vendors do not already demonstrate is normal 49 times between
+them.
+
+:func:`~py61850.scl.remove_supervision` produces the SAME edit -- the same
+primitive on the same element -- for a supervision node being cleared on its
+own, so the two paths cannot drift into leaving a stale supervision in two
+different shapes. See Q32.
 
 ## The stale-model hazard, which this module closes
 
@@ -217,6 +229,11 @@ from .controls import CONTROL_BLOCK_TAGS
 from .document import strip_ns
 from .edit import EditRejected, Remove, SetAttributes, SetTextContent
 from .extref import unsubscribe
+from .supervision import (
+    SUPERVISION_LN_CLASSES,
+    SUPERVISION_REFERENCE_DOS,
+    _supervision_values,
+)
 
 #: The SCL elements that carry an `iedName` attribute, and therefore everything
 #: a rename has to follow and a removal has to account for. **Exhaustive
@@ -239,19 +256,6 @@ IED_NAME_ELEMENTS = ("LNode", "ClientLN", "ExtRef", "KDC", "Association",
 #: can be called `None`, this value is a reserved sentinel, and it is neither
 #: Python's ``None`` nor the absence of the attribute.
 ORPHAN_IED_NAME = "None"
-
-#: The logical node classes that supervise a subscription. `tLN@lnClass` is an
-#: enumeration and these are its two supervision members: `LGOS` watches a
-#: GOOSE control block, `LSVS` a sampled-value one.
-SUPERVISION_LN_CLASSES = ("LGOS", "LSVS")
-
-#: The supervision data objects whose `setSrcRef` holds an object reference
-#: with an IED name concatenated into it. `GoID`, `Addr`, `VlanID`, `VlanPri`
-#: and `AppID` sit beside these and are deliberately absent -- they are copies
-#: of the publisher's identifiers and address, not references. See the module
-#: docstring.
-SUPERVISION_REFERENCE_DOS = ("GoCBRef", "SvCBRef", "DatSet")
-
 
 # -- namespace-exact access -------------------------------------------------
 
@@ -373,30 +377,6 @@ def _object_reference_index(doc) -> Dict[str, Optional[str]]:
             else:
                 index.setdefault(reference, owner)
     return index
-
-
-def _supervision_values(doc):
-    """Every `Val` holding a supervision object reference, with its text.
-
-    Yields ``(val, text)``. `DAI` is looked for anywhere under the `DOI`
-    rather than as a direct child, because 61850-6 lets an `SDI` nest between
-    them; no corpus file does, and the walk costs nothing.
-    """
-    namespace = _namespace(doc)
-    dai_tag, val_tag = namespace + "DAI", namespace + "Val"
-    for node in _own(doc, "LN"):
-        if node.get("lnClass") not in SUPERVISION_LN_CLASSES:
-            continue
-        for doi in node:
-            if (doi.tag != namespace + "DOI"
-                    or doi.get("name") not in SUPERVISION_REFERENCE_DOS):
-                continue
-            for dai in doi.iter(dai_tag):
-                if dai.get("name") != "setSrcRef":
-                    continue
-                for val in dai:
-                    if val.tag == val_tag:
-                        yield val, (val.text or "").strip()
 
 
 def _retext(element, text: Optional[str]) -> SetTextContent:

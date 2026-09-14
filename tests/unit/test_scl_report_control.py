@@ -464,8 +464,12 @@ class TestUpdateReportControl(_Base):
         self.assertEqual(update_report_control(doc, edit), [edit])
 
     def test_supervision_cannot_be_turned_on(self):
-        """A14's, and refused rather than quietly ignored -- the same answer
-        the six functions that already carry the flag give."""
+        """Refused rather than quietly ignored -- the same answer the seven
+        functions that carry the flag give. **And nothing supervises a
+        `ReportControl`**: 61850-7-4 defines `LGOS` for a `GSEControl` and
+        `LSVS` for a `SampledValueControl` and no report equivalent, so this
+        flag has nothing to do in either position; the wiring phase makes
+        `False` an accepted no-op here rather than a refusal."""
         doc = self.doc()
         edit = SetAttributes(_named(doc, "ReportControl", "R1"), {"desc": "x"})
         with self.assertRaisesRegex(EditRejected, "not written yet"):

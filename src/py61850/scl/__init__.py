@@ -146,10 +146,22 @@ from .document import (
 from .ied import (
     IED_NAME_ELEMENTS,
     ORPHAN_IED_NAME,
-    SUPERVISION_LN_CLASSES,
-    SUPERVISION_REFERENCE_DOS,
     remove_ied,
     update_ied,
+)
+from .supervision import (
+    LN_INST_RANGE,
+    SUPERVISION_LN_CLASSES,
+    SUPERVISION_REFERENCE_DOS,
+    MaxSupervision,
+    Supervision,
+    can_instantiate_supervision,
+    can_remove_supervision,
+    instantiate_supervision,
+    is_src_ref_editable,
+    max_supervision,
+    remove_supervision,
+    supervision_ln_class,
 )
 from .extref import (
     Connection,
@@ -222,4 +234,8 @@ __all__ = [
     "change_smv_content", "change_gse_or_smv_address", "connected_ap_for",
     "update_ied", "remove_ied", "IED_NAME_ELEMENTS", "ORPHAN_IED_NAME",
     "SUPERVISION_LN_CLASSES", "SUPERVISION_REFERENCE_DOS",
+    "Supervision", "MaxSupervision", "supervision_ln_class",
+    "max_supervision", "is_src_ref_editable",
+    "can_instantiate_supervision", "instantiate_supervision",
+    "can_remove_supervision", "remove_supervision", "LN_INST_RANGE",
 ]

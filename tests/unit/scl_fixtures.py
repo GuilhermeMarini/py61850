@@ -471,21 +471,89 @@ def rpt_enabled_with(clients, max_="1"):
 
 
 def supervision(ln_class="LGOS", inst="1", prefix="", cb_ref=None,
-                dat_set=None, go_id=None):
-    """An `LGOS` or `LSVS`, in the shape the reference corpus writes one.
+                dat_set=None, go_id=None, shape="val", ln_type=None):
+    """An `LGOS` or `LSVS`, in one of the shapes the reference corpus writes.
 
     ``cb_ref=None`` produces the IDLE shape -- ``<Val />`` with no text --
     which is not invented: `sel.scd` carries **24** `LGOS` written exactly
     that way, for a supervision node that is allocated and not yet pointed at
     anything. That is the shape a removal blanks back to.
 
+    ``shape`` picks how deep the setting path goes, because a free slot is
+    written two different ways by two different vendors and **both are free**:
+
+    ========== ================================================ =============
+    shape      what the reference `DOI` contains                 in the corpus
+    ========== ================================================ =============
+    ``val``    `DAI` with a `Val` (empty unless `cb_ref`)        26 idle, 549 bound
+    ``no_val`` `DAI` with no `Val` at all                        none
+    ``empty``  the `DOI`, with no `DAI`                          25, all Siemens
+    ``none``   no `DOI` at all                                   none
+    ========== ================================================ =============
+
+    The two the corpus does not write are there because the code has to place
+    a `DAI` under an existing `DOI` and a `Val` under an existing `DAI`, and
+    an untested branch in an edit builder is a branch that writes the wrong
+    element into somebody's station file.
+
     `go_id` is written beside the two references and is what a rename must
     NOT touch: all 191 in the corpus are equal to a real `GSEControl@appID`.
     """
     ref_do = "SvCBRef" if ln_class == "LSVS" else "GoCBRef"
-    body = doi(ref_do, dai("setSrcRef", val=cb_ref if cb_ref is not None else ""))
+    if shape == "val":
+        body = doi(ref_do,
+                   dai("setSrcRef", val=cb_ref if cb_ref is not None else ""))
+    elif shape == "no_val":
+        body = doi(ref_do, dai("setSrcRef"))
+    elif shape == "empty":
+        body = doi(ref_do)
+    elif shape == "none":
+        body = ""
+    else:
+        raise AssertionError(f"unknown supervision shape {shape!r}")
     body += doi("DatSet", dai("setSrcRef", val=dat_set if dat_set is not None else ""))
     if go_id is not None:
         body += doi("GoID", dai("setVal", val=go_id))
-    return ln(ln_class, inst=inst, prefix=prefix, ln_type=f"T_{ln_class}",
-              body=body)
+    return ln(ln_class, inst=inst, prefix=prefix,
+              ln_type=ln_type or f"T_{ln_class}", body=body)
+
+
+def sup_subscription(max_go="16", max_sv="0"):
+    """A `<SupSubscription>`: how many subscriptions an IED may supervise.
+
+    51 of the 58 corpus IEDs declare one. `maxGo` is 16, 64, 128 or 150 and
+    `maxSv` is 0 or 60 -- **43 of the 51 declare `maxSv="0"`**, so a device
+    that supports no sampled-value supervision at all is the common case
+    rather than an edge. Either may be passed ``None`` to leave it off, which
+    no corpus file does and both guards read as unconstrained.
+    """
+    attrs = ""
+    if max_go is not None:
+        attrs += f' maxGo="{max_go}"'
+    if max_sv is not None:
+        attrs += f' maxSv="{max_sv}"'
+    return f"<SupSubscription{attrs}/>"
+
+
+def supervision_types(ln_class="LGOS", val_kind="RO", val_import="true",
+                      id_=None):
+    """The `LNodeType` and `DOType` behind a supervision node's `setSrcRef`.
+
+    **This is where `valKind` and `valImport` live in a real file.** No `DAI`
+    in the reference corpus writes `valKind` at all; the `DOType` behind them
+    writes it 443 times. Pass ``None`` for either to leave it undeclared,
+    which is the state 157 corpus nodes are in and which
+    :func:`~py61850.scl.is_src_ref_editable` reads as permission rather than
+    as refusal.
+    """
+    ref_do = "SvCBRef" if ln_class == "LSVS" else "GoCBRef"
+    da = {"name": "setSrcRef", "bType": "ObjRef", "fc": "SP"}
+    if val_kind is not None:
+        da["valKind"] = val_kind
+    if val_import is not None:
+        da["valImport"] = val_import
+    type_id = id_ or f"T_{ln_class}"
+    return (lnode_type(type_id, ln_class=ln_class,
+                       dos=((ref_do, f"ORG_{type_id}"),
+                            ("DatSet", f"ORG_{type_id}"))),
+            do_type(f"ORG_{type_id}", cdc="ORG", das=(da,)))

@@ -92,8 +92,10 @@ vendor strings such as `QMA1_MU1_E_S1`, so nothing here disagrees with
 *"also updates SMV.cbName and supervision references"*, and this phase does
 the first and refuses the second. Supervision is A14's: the corpus holds 15
 `LSVS` logical nodes waiting for it, and `ignore_supervision=False` is refused
-rather than quietly ignored, exactly as in the six functions that already
-carry it.
+rather than quietly ignored, exactly as in the seven functions that carry it.
+:mod:`py61850.scl.supervision` now builds the edits; wiring them to these
+seven is the half of that phase that changes merged behaviour, and it is
+deliberately separate.
 
 It also re-points subscribers, which the reference documents for neither
 update function -- `mixed.scd` holds 256 `ExtRef` elements with
