@@ -129,10 +129,21 @@ jobs:
         # `python3`, not `python`: this job deliberately runs no
         # `setup-python` -- it only needs `gh` and the artefacts -- and the
         # unversioned `python` name is not guaranteed on the runner image.
+        #
+        # The tag is read from the ENVIRONMENT, and is never interpolated
+        # into the script as an expression. An expression expansion is pasted
+        # into the source before the shell sees it, so the tag name becomes
+        # CODE: git permits a double quote, parentheses and + in a refname, so
+        # a tag whose name closes the string literal and appends a call would
+        # run inside a job holding `contents: write` and a `GH_TOKEN`.
+        # `GITHUB_REF_NAME` is a default Actions variable, so reading it from
+        # `os.environ` costs nothing and cannot be parsed as anything but
+        # data. The tag check in the `build` job above has always done it this
+        # way; this step briefly did not.
         run: |
           python3 - <<'EOF'
-          import pathlib, re, sys
-          version = "${{ github.ref_name }}".removeprefix("v")
+          import os, pathlib, re, sys
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
           text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           m = re.search(rf"^## {re.escape(version)} .*?$(.*?)(?=^## |\Z)",
                         text, re.M | re.S)
