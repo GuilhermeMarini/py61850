@@ -56,6 +56,7 @@ from py61850.scl import (
     Remove,
     SclDocument,
     SetAttributes,
+    children_local,
     prune_lnode_specification,
     remove_process_element,
     strip_ns,
@@ -1352,4 +1353,82 @@ class TestSpecificationAgainstASource(_Spec):
                           ("DAS", "stVal")] * 2, self.spec_names(doc))
 
         doc.apply_edit(undo)
+        self.assertEqual(before, doc.to_bytes())
+
+
+class TestSpecificationCorpus(unittest.TestCase):
+    """The corpus is NOT innocent of IEC TR 61850-6-100, and A16b's first
+    reading of it said otherwise.
+
+    A16 established that all twenty-three Substation-section element names are
+    zero in all three exports, `DOS`, `SDS` and `DAS` among them, and
+    `TestNoCorpusMaterial` above still asserts exactly that. What it does not
+    say -- and what the phase that added this function initially wrote as
+    though it did -- is that the NAMESPACE is absent too. **It is not.**
+    `mixed.scd` declares it on the root, with the TR's own
+    ``version``/``revision``/``release`` attributes beside the SCL edition's,
+    and carries **17 elements in it**: one `ServiceSpecifications` holding
+    sixteen `SMVParameters`, in a root-level `Private` alongside five
+    Siemens-private blocks.
+
+    So this module's second IEC namespace is **live material from a real
+    vendor tool**, not a convention known only from IEC's example files. What
+    the corpus lacks is the part `prune_lnode_specification` reads: it has no
+    `LNode` at all, so there is nothing for a specification to hang on.
+
+    That makes a real corpus test possible where A16 deliberately had none,
+    and it is the tripwire for the day a DIGSI export starts writing `DOS`.
+    """
+
+    def corpus(self, name):
+        path = roundtrip.CORPUS / name
+        if not path.is_file():
+            self.skipTest("the corpus is not in this distribution")
+        return SclDocument.parse(path)
+
+    def spec_namespace_elements(self, doc):
+        return [strip_ns(el.tag) for el in doc.root.iter()
+                if isinstance(el.tag, str)
+                and el.tag.startswith(SPECIFICATION_NS)]
+
+    def test_one_export_declares_the_namespace_and_two_do_not(self):
+        declared = {name: b"61850/2019/SCL/6-100"
+                    in (roundtrip.CORPUS / name).read_bytes()
+                    for name in ("sel.scd", "mixed.scd", "siemens.scd")
+                    if (roundtrip.CORPUS / name).is_file()}
+        if not declared:
+            self.skipTest("the corpus is not in this distribution")
+        self.assertEqual({"sel.scd": False, "mixed.scd": True,
+                          "siemens.scd": False}, declared)
+
+    def test_mixed_carries_seventeen_elements_and_none_is_a_specification(self):
+        found = self.spec_namespace_elements(self.corpus("mixed.scd"))
+        self.assertEqual(17, len(found))
+        self.assertEqual({"ServiceSpecifications": 1, "SMVParameters": 16},
+                         {name: found.count(name) for name in set(found)})
+        # The three this module removes are not among them, which is why
+        # `TestNoCorpusMaterial` and this class do not contradict each other.
+        self.assertEqual(set(), set(found) & set(SPECIFICATION_ELEMENTS))
+
+    def test_the_two_silent_exports_carry_nothing_in_the_namespace(self):
+        for name in ("sel.scd", "siemens.scd"):
+            self.assertEqual([], self.spec_namespace_elements(
+                self.corpus(name)), name)
+
+    def test_the_prune_is_a_no_op_over_every_type_the_corpus_declares(self):
+        # 277 LNodeType in `mixed.scd` and 0 LNode: the pool is entirely for
+        # IEDs, so nothing specifies anything. Asserted against the BYTES,
+        # because a function that reads a 6-100 Private must be shown not to
+        # touch the one the corpus actually has -- that Private is Siemens's
+        # neighbour and `sellib`/`siemenslib` territory is next door to it.
+        doc = self.corpus("mixed.scd")
+        before = doc.to_bytes()
+        ids = [type_.get("id")
+               for section in children_local(doc.root, "DataTypeTemplates")
+               for type_ in children_local(section, "LNodeType")]
+        self.assertEqual(277, len(ids))
+        self.assertEqual(0, len(list(doc.root.iter(
+            doc.root.tag[:doc.root.tag.index("}") + 1] + "LNode"))))
+        for id_ in ids:
+            self.assertEqual([], prune_lnode_specification(doc, id_))
         self.assertEqual(before, doc.to_bytes())

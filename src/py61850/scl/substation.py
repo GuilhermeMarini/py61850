@@ -244,8 +244,18 @@ vendor name. This carries an IEC namespace URI and IEC element names,
 published by IEC in a TR that is part of 61850-90-30 and 7-6. The boundary the
 `Private` rule draws is therefore about **who published the namespace**, not
 about the mechanism: `sellib` reads ``Private[@type="SEL_..."]`` and
-`siemenslib` reads Siemens's, neither reads ``eIEC61850-6-100``, and none of
-the three reference exports carries a `DOS` in any namespace at all.
+`siemenslib` reads Siemens's, and neither reads ``eIEC61850-6-100``.
+
+**And the namespace is live material, not a convention known only from IEC's
+example files.** `mixed.scd` declares it on the root, with the TR's own
+``version``/``revision``/``release`` attributes beside the SCL edition's, and
+carries **17 elements in it** -- one `ServiceSpecifications` holding sixteen
+`SMVParameters`, in a root-level `Private` sitting alongside five
+Siemens-private blocks. What that export has none of is the part this function
+reads: **0 `LNode`**, so nothing specifies anything, and the prune over all
+**277** of its `LNodeType` emits nothing and leaves the bytes alone.
+`sel.scd` and `siemens.scd` do not declare the namespace at all.
+`TestSpecificationCorpus` asserts all of it.
 
 ## What "missing" means, and the two spellings that do not mean what they say
 
