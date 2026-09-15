@@ -74,6 +74,8 @@ class TestSurface(unittest.TestCase):
             "update_substation", "update_voltage_level", "update_bay",
             "remove_process_element", "TERMINAL_ELEMENTS",
             "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
+            "prune_lnode_specification", "SPECIFICATION_NS",
+            "SPECIFICATION_ELEMENTS",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

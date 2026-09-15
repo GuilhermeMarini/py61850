@@ -5,15 +5,17 @@
 # General Public License v3 or later; see LICENSE. A commercial licence,
 # for use in software you do not wish to release under the AGPL, is
 # available from the copyright holder -- see COMMERCIAL.md.
-"""Renaming a `Substation`, a `VoltageLevel` or a `Bay`, and removing a piece of the primary system.
+"""Renaming a `Substation`, a `VoltageLevel` or a `Bay`, removing a piece of the primary system, and pruning an `LNode`'s specification.
 
     from py61850.scl import (Remove, SclDocument, SetAttributes,
+                             prune_lnode_specification,
                              remove_process_element, update_bay,
                              update_substation, update_voltage_level)
 
     doc = SclDocument.parse("station.ssd")
     doc.apply_edit(update_bay(doc, SetAttributes(bay, {"name": "Q02"})))
     doc.apply_edit(remove_process_element(doc, Remove(bay)))
+    doc.apply_edit(prune_lnode_specification(doc, "SE_PTOC_SET_V002"))
 
 **A container's name is written down four more times than on the container.**
 A `Bay` called ``Q01`` is named by its own `@name`, by the `pathName` of every
@@ -188,6 +190,145 @@ table.
 - **It does not cascade into `DataTypeTemplates`.** An `LNodeType` that a
   removed `LNode` was the last user of stays, exactly as `remove_ied` leaves
   one: the caller removed a piece of the primary system, not a type.
+
+  :func:`prune_lnode_specification` READS that section and still does not
+  change it. The direction is the distinction: it asks the pool what a type
+  declares and edits the `LNode` accordingly, never the other way round.
+
+## The specification children: a SECOND IEC namespace inside this section
+
+:func:`prune_lnode_specification` is the odd one out here and the rest of this
+docstring is about why it is here anyway.
+
+An `LNode` says *which* logical node a device must provide. IEC **TR**
+61850-6-100 adds what that node must contain -- `DOS` for a data object, `SDS`
+for a structured child of one, `DAS` for a data attribute -- and they are the
+engineer's requirement, written before any device exists. When the `LNodeType`
+behind the `LNode` changes, the specification children the new declaration
+cannot carry have to go.
+
+**None of the three is in 61850-6.** Zero occurrences of `DOS`, `SDS` or `DAS`
+in the `2007B4` XSD set and zero in `2007C5`. They belong to
+``{http://www.iec.ch/61850/2019/SCL/6-100}``, whose `targetNamespace` is
+identical in the TR's `2019B9` and `2019C1` editions and whose content models
+for these three are identical between them, so a reader keyed on the namespace
+is edition-stable.
+
+**Only `DOS` is a global element.** `SDS` and `DAS` are declared solely as
+local elements inside ``tDOS`` and ``tSDS``, so they can appear nowhere but
+under a `DOS`. That makes `DOS` the single attachment point, and it is what
+lets this module look for one thing rather than three.
+
+## Where a `DOS` may sit -- two places, and the file convention is not the schema
+
+``tBaseElement``, which **every** SCL element extends, opens with
+``<xs:any namespace="##other" processContents="lax" minOccurs="0"
+maxOccurs="unbounded"/>`` before `Text` and `Private` -- identical in `2007B4`
+and `2007C5`. So a `DOS` is schema-valid **directly under `LNode`**, which is
+literally what the TR's own annotation asks for: *"Data Object specification.
+To be added to LNode SCL element"*. It is equally valid inside a `Private`,
+whose ``tAnyContentFromOtherNamespace`` takes ``##other`` too.
+
+IEC's own example SSDs put **106 of 106** at
+``LNode/Private[@type="eIEC61850-6-100"]/DOS`` -- and **that `@type` string
+appears nowhere in the 6-100 XSD.** It is the files' convention; it happens to
+equal the schema's own namespace PREFIX. So this module finds a `DOS` by its
+namespace-qualified tag, among an `LNode`'s own children and among the
+children of any of its `Private` elements, and never reads `Private@type` at
+all. Both attachment points are covered and neither convention is required.
+
+**This is not the vendor seam, although the mechanism is identical.** The rule
+this package states for `Private` is that a **vendor** concept never enters
+`py61850.scl` -- and its own test is whether the code would have to carry a
+vendor name. This carries an IEC namespace URI and IEC element names,
+published by IEC in a TR that is part of 61850-90-30 and 7-6. The boundary the
+`Private` rule draws is therefore about **who published the namespace**, not
+about the mechanism: `sellib` reads ``Private[@type="SEL_..."]`` and
+`siemenslib` reads Siemens's, and neither reads ``eIEC61850-6-100``.
+
+**And the namespace is live material, not a convention known only from IEC's
+example files.** `mixed.scd` declares it on the root, with the TR's own
+``version``/``revision``/``release`` attributes beside the SCL edition's, and
+carries **17 elements in it** -- one `ServiceSpecifications` holding sixteen
+`SMVParameters`, in a root-level `Private` sitting alongside five
+Siemens-private blocks. What that export has none of is the part this function
+reads: **0 `LNode`**, so nothing specifies anything, and the prune over all
+**277** of its `LNodeType` emits nothing and leaves the bytes alone.
+`sel.scd` and `siemens.scd` do not declare the namespace at all.
+`TestSpecificationCorpus` asserts all of it.
+
+## What "missing" means, and the two spellings that do not mean what they say
+
+`DOS@name` is `scl:tDataName` and resolves against the `LNodeType`'s `DO`
+names. Below that:
+
+- ``uniqueDAorSDOInDOType`` has selector ``./*`` and field ``@name``, so
+  **inside one `DOType` an `SDO` and a `DA` share one name space** and a name
+  can never be both. The lookup order is therefore not a choice. So are
+  ``uniqueDOInLNodeType`` and ``uniqueBDAInDAType``: the name is a key at
+  every level of the walk.
+- **`SDS` is not a sub-data-object, whatever its annotation says.** Its
+  ``@name`` is typed `scl:tAttributeNameEnum`, not `tDataName`, and in
+  `Eng POC.ssd` **all 17 `SDS` resolve to a `DA` with ``bType="Struct"`` and
+  not one resolves to an `SDO`** -- ``crvPts``, ``xUnits``, ``yUnits`` under a
+  CURVE-shaped DO, ``setMag`` under an ASG.
+- **`DAS` is a leaf in the schema.** Its ``xs:choice`` holds `SubscriberLNode`,
+  `ControllingLNode`, `ProcessEcho`, `LogParametersRef`, `Val` and `Labels`,
+  and no nested `DAS` or `SDS`. So the only spelling available for depth --
+  whether the depth comes from an `SDO` or from a `Struct` `DA`/`BDA` -- is
+  `SDS`.
+
+**So a child is matched by `@name` in its parent's resolved type and the
+spelling is ignored.** A resolver that required ``SDS`` to name an `SDO` would
+delete every one of IEC's seventeen.
+
+## It removes, and it removes a fifth of IEC's own file
+
+The reference returns ``Remove[]`` -- not ``EditV2[]`` -- so it is purely
+subtractive by declaration as well as by its doc comment: a `DOS` the type
+declares and the instance lacks is never invented. Ours matches, and only the
+HIGHEST missing element is removed, because a `Remove` of a `DOS` already
+takes its `SDS` and `DAS` with it.
+
+**That is not a quiet rule.** Resolved against their own `DataTypeTemplates`,
+with 0 of the DOS-carrying `LNode` failing to resolve their `@lnType`:
+
+===============================  =======  ============================
+example file                       spec    removed by a strict prune
+===============================  =======  ============================
+`Eng POC.ssd`                        374   **74** -- 1 `DOS`, 73 `DAS`
+`IEC 61850-90-30 examples.ssd`        31   4 directly, **17** with the
+                                           subtrees they carry
+===============================  =======  ============================
+
+and the misses are systematic rather than scattered: **72 of `Eng POC`'s 73**
+are ``DAS name="d"`` -- the CDC description attribute -- against trimmed
+`DOType`s such as ``ELIA_SPS_basic_V001``, which declares ``stVal``, ``q`` and
+``t`` and nothing else. The `DOS` misses are data objects the `LNodeType`
+genuinely does not declare.
+
+The strict reading is kept anyway, because an SSD whose `lnType` has been
+re-pointed *should* lose what the new type cannot carry, and softening it
+would invent a rule the reference does not have. The number is recorded here
+so that a caller is not surprised by it.
+
+## What the prune leaves alone
+
+- **A type that does not resolve.** An `LNode` whose `@lnType` names an
+  `LNodeType` the pool lacks, a `DO` whose `@type` names a missing `DOType`, a
+  ``Struct`` `DA` whose `DAType` is absent: everything at and below that point
+  is untouched. :class:`~py61850.scl.TemplatePool` tolerates a dangling
+  reference on READ deliberately, because a trimmed ICD is a real file, and
+  deleting a specification because the pool is trimmed is the opposite of what
+  the caller asked for. It is the same restraint the renames above apply to a
+  `@connectivityNode` that resolves to nothing.
+- **An `LNode` with no `@lnType`.** One of the 90-30 example's sixteen has
+  none; there is no type for anything to be missing from.
+- **`@ix`.** ``SDS@ix`` and ``DAS@ix`` are array indices and the TR's key is
+  ``(@name, @ix)``, but whether an index is within an array bound is a
+  different question from whether the name exists -- and **0 `DA` or `BDA` in
+  either example file carries ``@count``** to bound it with. 4 spec elements
+  carry an ``ix``; all four resolve or fail on their name alone.
 """
 
 from __future__ import annotations
@@ -197,6 +338,7 @@ from xml.etree import ElementTree as ET
 
 from .document import strip_ns
 from .edit import EditRejected, Remove, SetAttributes
+from .templates import TemplatePool
 
 #: The two elements typed `tTerminal`, and therefore the two that carry the
 #: container-name attributes a rename has to follow. **Exhaustive against the
@@ -225,6 +367,20 @@ CONTAINER_NAME_ATTRIBUTES = {
 #: :func:`remove_process_element` requires its node to be one of these or to
 #: sit inside one.
 PROCESS_SECTIONS = ("Substation", "Line", "Process")
+
+#: IEC **TR** 61850-6-100's namespace, in `ElementTree`'s ``{uri}`` spelling.
+#: The three specification elements live here and in neither SCL edition; the
+#: `targetNamespace` is the same in the TR's `2019B9` and `2019C1`, so keying
+#: on it rather than on a `Private@type` string is edition-stable. The module
+#: docstring has the derivation.
+SPECIFICATION_NS = "{http://www.iec.ch/61850/2019/SCL/6-100}"
+
+#: The three elements :func:`prune_lnode_specification` removes, outermost
+#: first. **Only `DOS` is a global element declaration**; `SDS` and `DAS` are
+#: declared solely inside ``tDOS`` and ``tSDS``, so they can appear nowhere
+#: but under a `DOS` and this module looks for one attachment point, not
+#: three.
+SPECIFICATION_ELEMENTS = ("DOS", "SDS", "DAS")
 
 
 # -- namespace-exact access -------------------------------------------------
@@ -675,4 +831,226 @@ def remove_process_element(doc, edit) -> List:
         path = cn.get("pathName")
         if path and path not in pointed_at:
             edits.append(Remove(cn))
+    return edits
+
+
+# -- pruning an LNode's specification ---------------------------------------
+
+def _spec(local_name: str) -> str:
+    return SPECIFICATION_NS + local_name
+
+
+def _specification_roots(doc, lnode) -> List[ET.Element]:
+    """Every `DOS` attached to ``lnode``, in document order.
+
+    **Both schema-valid attachment points.** ``tBaseElement`` opens with an
+    ``xs:any namespace="##other"``, so a `DOS` may be a direct child of the
+    `LNode` -- which is what IEC TR 61850-6-100's own annotation asks for --
+    and `Private`'s ``tAnyContentFromOtherNamespace`` accepts one too. IEC's
+    example files use the second on 106 of 106, with
+    ``@type="eIEC61850-6-100"``, **a string that appears nowhere in the 6-100
+    schema**. So the tag's namespace is what identifies a `DOS` here and
+    `Private@type` is never read.
+
+    A `Private` is descended one level and no further: a `DOS` nested deeper
+    inside one belongs to whatever structure put it there.
+    """
+    found: List[ET.Element] = []
+    for child in lnode:
+        if child.tag == _spec("DOS"):
+            found.append(child)
+        elif isinstance(child.tag, str) and strip_ns(child.tag) == "Private":
+            found.extend(grandchild for grandchild in child
+                         if grandchild.tag == _spec("DOS"))
+    return found
+
+
+def _specification_children(node) -> List[ET.Element]:
+    """The `SDS` and `DAS` directly under ``node``, in document order.
+
+    Nothing else: a `DOS` may also hold `SubscriberLNode`, `ControllingLNode`,
+    `ProcessEcho`, `LogParametersRef` and `Labels`, none of which names a
+    member of a data type and none of which this function has any view on.
+    """
+    return [child for child in node
+            if child.tag in (_spec("SDS"), _spec("DAS"))]
+
+
+def _resolve_below(pool, context, name):
+    """What ``name`` means inside ``context``, as the next context or a leaf.
+
+    ``context`` is a :class:`~py61850.scl.DoTypeSpec` or the ``{name:
+    AttributeSpec}`` mapping of a `DAType`. The answer is one of three:
+
+    ============  =======================================================
+    ``"gone"``    the type does not declare this name -- it is missing
+    ``{}``        declared, and it declares no members of its own, so
+                  anything written under it is missing in turn
+    ``None``      declared, and its own type is not in the pool
+    an object     declared, and this is the context for its children
+    ============  =======================================================
+
+    **A leaf is an EMPTY context rather than a separate answer.** A `DAS` has
+    no children in the schema, but a `SDS` may, and one written over a
+    ``BOOLEAN`` or a `Quality` names something the type does not declare at
+    any depth. Returning the empty mapping makes the next level resolve that
+    for itself instead of asking this function to special-case it.
+
+    **The lookup order is not a choice.** ``uniqueDAorSDOInDOType`` selects
+    ``./*`` on field ``@name``, so an `SDO` and a `DA` in one `DOType` share
+    one name space and a name can never be both; ``uniqueDOInLNodeType`` and
+    ``uniqueBDAInDAType`` make the same true one level up and one level down.
+
+    **A declared name whose own type is missing resolves to ``None``**, which
+    every caller reads as "leave it and everything under it alone". That is
+    the module docstring's rule: a trimmed pool is a real file and deleting a
+    specification because a `DOType` is absent is the opposite of the edit
+    asked for.
+    """
+    attribute = None
+    if hasattr(context, "sub_objects"):
+        sub_object = context.sub_objects.get(name)
+        if sub_object is not None:
+            # An SDO: the next context is its own DOType, or None when the
+            # pool does not carry it.
+            return pool.do_type(sub_object)
+        attribute = context.attributes.get(name)
+    else:
+        attribute = context.get(name)
+    if attribute is None:
+        return "gone"
+    if attribute.btype != "Struct" or not attribute.type:
+        return {}
+    return pool.da_type(attribute.type)
+
+
+def _missing_below(pool, node, context) -> List[ET.Element]:
+    """The specification elements under ``node`` that ``context`` does not
+    declare.
+
+    **Only the highest one on each branch.** A :class:`~py61850.scl.Remove` of
+    a `DOS` takes its `SDS` and `DAS` with it, so descending into a subtree
+    that is already going would emit removals of nodes that no longer exist
+    when they apply -- Q33 §9's hazard, which is why this stops at the element
+    it removes rather than collecting every descendant.
+
+    **The spelling is ignored and the name decides.** `SDS` is documented as a
+    sub-data-object and is nothing of the kind: all 17 in `Eng POC.ssd`
+    resolve to a ``Struct`` `DA`, and `tDAS` has no nested `DAS` or `SDS` at
+    all, so `SDS` is simply the spelling depth takes. Matching on the element
+    name instead of the attribute name would remove every one of them.
+    """
+    missing: List[ET.Element] = []
+    for child in _specification_children(node):
+        name = child.get("name")
+        below = "gone" if name is None else _resolve_below(pool, context, name)
+        if below == "gone":
+            missing.append(child)
+        elif below is not None:
+            missing.extend(_missing_below(pool, child, below))
+    return missing
+
+
+def _declaring_pool(doc, id_, source):
+    """The pool ``id_``'s declaration should be read from, and that
+    declaration.
+
+    ``source`` is ``None`` for the ordinary case -- the declaration is already
+    in ``doc`` -- and a second :class:`~py61850.scl.SclDocument` when the
+    prune is being composed with an import that has not been applied yet.
+    **Names are what this function compares, and an import preserves them**
+    whatever `on_conflict` does to the ids, so resolving the whole closure
+    through the source's own pool gives the answer the target will have.
+    """
+    declaring = doc if source is None else source
+    root = getattr(declaring, "root", None)
+    if not isinstance(root, ET.Element):
+        raise EditRejected(
+            f"expected an SclDocument, not {type(declaring).__name__}; a "
+            f"declaration is read from a document because an LNodeType's "
+            f"DOType and DAType live in ITS DataTypeTemplates and "
+            f"ElementTree elements carry no owner")
+    pool = TemplatePool(root)
+    declaration = pool.lnode_type(id_)
+    if declaration is None:
+        where = "target" if source is None else "source"
+        raise EditRejected(
+            f"the {where} document carries no LNodeType {id_!r}; a prune "
+            f"compares an LNode's specification against a declaration, and "
+            f"there is none to compare it with")
+    return pool, declaration
+
+
+def prune_lnode_specification(doc, id_, source=None) -> List:
+    """Remove what `LNodeType` ``id_`` no longer declares, from every `LNode`
+    using it.
+
+    An `LNode` may carry a **specification** of what the logical node must
+    contain -- `DOS` for a data object, `SDS` for a structured child of one,
+    `DAS` for a data attribute. These are IEC **TR** 61850-6-100's, in
+    :data:`SPECIFICATION_NS` and in neither SCL edition, and the module
+    docstring has the derivation and the two places one may sit.
+
+    ``id_`` is an `LNodeType` `id`. Every `LNode` in ``doc`` whose `@lnType`
+    is that `id` is walked, and a :class:`~py61850.scl.Remove` comes back for
+    each specification element the type does not declare -- **the outermost
+    one on each branch only**, since removing a `DOS` removes its children
+    with it. Nothing is added and nothing is renamed, which is the reference's
+    own shape: `updateLnType` returns ``Remove[]``, not ``EditV2[]``.
+
+    ``source`` is the document to read the declaration from, and defaults to
+    ``doc`` itself. Passing one prunes against a declaration that has not
+    landed yet, so this composes with
+    :func:`~py61850.scl.update_lnode_type` into a single history entry::
+
+        doc.apply_edit(update_lnode_type(doc, new, "SE_PTOC_SET_V002")
+                       + prune_lnode_specification(doc, "SE_PTOC_SET_V002",
+                                                   source=new))
+
+    Without that, the prune would have to run after the update was applied and
+    one intent would cost two undo steps. It is the same hazard Q33 §9, Q34 §5
+    and Q35 §7 each met from a different side: inside a compound edit the
+    document is out of date, so the batch has to be its own record.
+
+    **The name says what it does.** The reference calls this `updateLnType`,
+    files it under `tSubstation` and documents it as removing children -- so
+    the name disagrees with its own doc comment, with its return type and with
+    its directory. Q23 settled that the behaviour wins, and
+    :func:`~py61850.scl.update_lnode_type` already exists in this package
+    meaning something else entirely.
+
+    **A type that does not resolve is left alone**, at whatever depth it stops
+    -- an absent `LNodeType`, `DOType` or `DAType` ends the walk on that
+    branch rather than condemning it. So is an `LNode` with no `@lnType`, and
+    so is `@ix`. The module docstring argues all three, and records that a
+    strict prune removes 74 of 374 specification elements from IEC's own
+    `Eng POC.ssd`.
+
+    Returns ``[]`` when every specification element resolves, which is the
+    ordinary answer for a document nobody has re-typed.
+
+    Raises :class:`~py61850.scl.EditRejected` if the document the declaration
+    is read from carries no `LNodeType` ``id_``.
+    """
+    pool, declaration = _declaring_pool(doc, id_, source)
+
+    edits: List = []
+    for lnode in _own(doc, "LNode"):
+        if lnode.get("lnType") != id_:
+            continue
+        for dos in _specification_roots(doc, lnode):
+            name = dos.get("name")
+            do_type_id = (declaration.objects.get(name)
+                          if name is not None else None)
+            if do_type_id is None:
+                edits.append(Remove(dos))
+                continue
+            context = pool.do_type(do_type_id)
+            if context is None:
+                # The DO is declared and its DOType is not in the pool. The
+                # `DOS` itself stays -- the type DOES declare the object --
+                # and nothing under it can be judged.
+                continue
+            edits.extend(Remove(element)
+                         for element in _missing_below(pool, dos, context))
     return edits

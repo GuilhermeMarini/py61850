@@ -81,6 +81,14 @@ hedge: those four read the tree directly, ask the schema what a rename must
 follow and are checked against fixtures built for them, where a read model
 would have to decide what a `Bay` IS to a consumer -- and that is the decision
 no corpus file is available to referee.
+
+That module also carries :func:`~py61850.scl.prune_lnode_specification`, which
+is the one place a **second IEC namespace** enters this package: IEC TR
+61850-6-100's `DOS`, `SDS` and `DAS`, which specify what an `LNode` must
+contain and which the SCL schema does not declare. They travel in the same
+``Private`` slot the vendor libraries use, and the line between them is who
+published the namespace rather than the mechanism -- the module docstring
+argues it.
 """
 
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_bytes, reject_dtd_in_file
@@ -149,7 +157,10 @@ from .sampled_value_control import (
 from .substation import (
     CONTAINER_NAME_ATTRIBUTES,
     PROCESS_SECTIONS,
+    SPECIFICATION_ELEMENTS,
+    SPECIFICATION_NS,
     TERMINAL_ELEMENTS,
+    prune_lnode_specification,
     remove_process_element,
     update_bay,
     update_substation,
@@ -274,4 +285,6 @@ __all__ = [
     "update_substation", "update_voltage_level", "update_bay",
     "remove_process_element", "TERMINAL_ELEMENTS",
     "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
+    "prune_lnode_specification", "SPECIFICATION_NS",
+    "SPECIFICATION_ELEMENTS",
 ]
