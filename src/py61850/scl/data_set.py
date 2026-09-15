@@ -183,6 +183,7 @@ from xml.etree import ElementTree as ET
 
 from .control_block import control_blocks, updated_conf_rev
 from .document import strip_ns
+from .generator import _allocated_name
 from .edit import EditRejected, Insert, Remove, SetAttributes
 from .extref import (
     _ancestor,
@@ -493,19 +494,26 @@ def updated_conf_rev_edits(doc, data_set, exclude=()) -> List[SetAttributes]:
 
 # -- element creation -------------------------------------------------------
 
-def create_data_set(doc, parent, name, desc=None, force=False) -> List:
+def create_data_set(doc, parent, name=None, desc=None, force=False,
+                    taken=()) -> List:
     """The edit that adds a new `DataSet` to ``parent``.
 
     ``parent`` is an `LN0` or an `LN`. The element is placed by A7's
     :func:`~py61850.scl.reference_for`, so it lands where the content model
     puts a `DataSet` rather than at the end.
 
-    **`name` is required here, where the reference's is optional.** Filling
-    one in means allocating a unique name, and allocation policy is A17's --
-    its own row in the plan calls it a likely divergence. A `create` that
-    invented a name now and changed it at A17 would be worse than one that
-    asks. `DataSet@name` is ``use="required"`` in the schema, so there is no
-    valid element to produce without it.
+    **`name` is optional since A17b, and ``None`` is what asks for one.**
+    A10 made it required because allocating a unique name was A17's and a
+    `create` that invented one then and changed it later would be worse than
+    one that asked; A17 shipped the allocator and this now calls it. The name
+    is :func:`~py61850.scl.unique_element_name`'s -- ``newDataSet``, then
+    ``newDataSet_1`` -- and the ``new`` prefix is the reference's own, so an
+    allocated name announces itself as a placeholder.
+
+    **``None`` and ``""`` mean different things.** ``None`` is "choose one";
+    an empty string is a caller whose own name computation returned nothing,
+    and it still raises. `DataSet@name` is ``use="required"``, so there is no
+    valid element either way.
 
     ``force`` skips the `ConfDataSet` guard, as the reference's `skipCheck`
     does. The collision and the content-model checks are not skippable: they
@@ -533,10 +541,7 @@ def create_data_set(doc, parent, name, desc=None, force=False) -> List:
         raise EditRejected(
             f"{strip_ns(parent.tag)} may not hold a DataSet; expected one of "
             f"{', '.join(DATA_SET_PARENTS)}")
-    if not name:
-        raise EditRejected(
-            "a DataSet needs a name -- it is required by the schema and "
-            "unique within its logical node; allocating one is A17's")
+    name = _allocated_name(parent, "DataSet", name, taken)
     clash = next((other for other in _same_ns_children(parent, "DataSet")
                   if other.get("name") == name), None)
     if clash is not None:

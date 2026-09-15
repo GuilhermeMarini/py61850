@@ -143,8 +143,11 @@ naming the SUPERVISED device (`Q1_TR1_UPC1` on an `LGOS` in another relay) --
 a vendor convention this package takes no view on. Scanning by class alone
 cannot collide. Corpus `inst` values run 1 to 31 and are not dense: 26 of the
 59 (IED, class) blocks have a hole in them, so allocation fills holes rather
-than appending. **Allocation policy is A17's**, and this is the provisional
-rule its phase takes over; ``fixed_ln_inst`` overrides it.
+than appending. **A17 took the rule over and it did not change**:
+:func:`~py61850.scl.next_ln_inst` is the same lowest-free, class-only scan
+over the same range, and `_free_inst` now delegates to it so the two cannot
+drift. What stays here is ``fixed_ln_inst``, because overriding an allocation
+is this module's business rather than the allocator's.
 
 ## What the seven flags reach, and what each `False` means
 
@@ -231,6 +234,7 @@ from .document import strip_ns
 from .edit import EditRejected, Insert, Remove, SetTextContent
 from .extref import source_control_block
 from .generator import LN_INST_RANGE as _LN_INST_RANGE
+from .generator import next_ln_inst
 from .ordering import reference_for
 
 #: The logical node classes that supervise a subscription. `tLN@lnClass` is an
@@ -672,26 +676,22 @@ def _free_inst(doc, parent, ln_class, fixed_ln_inst, batch=None) -> str:
     ``batch`` adds the instances an unapplied compound edit has already taken,
     which the document cannot show; see :class:`_Batch`.
     """
-    used = {node.get("inst") for node in _same_ns_children(parent, "LN")
-            if node.get("lnClass") == ln_class}
-    if batch is not None:
-        used |= batch.insts.get(id(parent), set())
+    taken = batch.insts.get(id(parent), set()) if batch is not None else set()
     if fixed_ln_inst is not None:
         inst = str(fixed_ln_inst)
+        used = {node.get("inst") for node in _same_ns_children(parent, "LN")
+                if node.get("lnClass") == ln_class} | taken
         if inst in used:
             raise EditRejected(
                 f"{ln_class}{inst} is already in LDevice "
                 f"{parent.get('inst')!r}; tLN is identified by prefix, "
                 f"lnClass and inst")
         return inst
-    low, high = LN_INST_RANGE
-    for candidate in range(low, high + 1):
-        if str(candidate) not in used:
-            return str(candidate)
-    raise EditRejected(
-        f"LDevice {parent.get('inst')!r} already holds {ln_class} instances "
-        f"{low} to {high}, which is the whole range 61850-6 allows for "
-        f"tLN@inst")
+    # The scan itself is `next_ln_inst`'s: same lowest-free rule, same
+    # class-only reading of `prefix`, same range. A17b delegates it so the two
+    # cannot drift, and keeps `fixed_ln_inst` here because overriding an
+    # allocation is this function's business rather than the allocator's.
+    return next_ln_inst(parent, "LN", ln_class, taken)
 
 
 def _plan(doc, supervision, supervision_ln, new_supervision_ln, fixed_ln_inst,

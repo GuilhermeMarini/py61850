@@ -189,6 +189,8 @@ from .document import (
     strip_ns,
 )
 from .generator import (
+    ALLOCATED_NAME_PREFIX,
+    ALLOCATED_NAME_SUFFIX_START,
     APP_ID_RANGES,
     LN_INST_ELEMENTS,
     LN_INST_RANGE,
@@ -305,5 +307,5 @@ __all__ = [
     "SPECIFICATION_ELEMENTS",
     "next_mac_address", "next_app_id", "next_ln_inst", "unique_element_name",
     "MAC_ADDRESS_PREFIXES", "APP_ID_RANGES", "LN_INST_ELEMENTS",
-    "SERVICE_TYPES",
+    "SERVICE_TYPES", "ALLOCATED_NAME_PREFIX", "ALLOCATED_NAME_SUFFIX_START",
 ]

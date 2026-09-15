@@ -170,6 +170,7 @@ from xml.etree import ElementTree as ET
 
 from .document import children_local, strip_ns
 from .edit import EditRejected, Insert, Remove
+from .generator import ALLOCATED_NAME_SUFFIX_START as SUFFIX_START
 from .ordering import reference_for
 
 #: The four `DataTypeTemplates` children, in the order the content model puts
@@ -373,13 +374,27 @@ def _fresh_id(kind, id_, taken) -> str:
     """An `id` like ``id_`` that no type of ``kind`` in the target carries.
 
     A numeric suffix off the source's own `id`, so the imported type stays
-    recognisable as the one it was copied from. **Allocation policy is A17's**
-    -- `uniqueElementName` has its own row and its own likely divergence -- and
-    this is deliberately the simplest rule that terminates, to be replaced
-    there rather than competed with.
+    recognisable as the one it was copied from --
+    :data:`~py61850.scl.ALLOCATED_NAME_SUFFIX_START` and the rule
+    :func:`~py61850.scl.unique_element_name` applies to element names.
+
+    **A17 was expected to replace this and confirmed it instead.** Q34 §3
+    conceded it as "the simplest rule that terminates, to be replaced there
+    rather than competed with"; A17 measured the corpus and found the numeric
+    suffix is what vendors already write -- `siemens.scd` carries ``DataSet``,
+    ``DataSet_1``, ``DataSet_2``, ``DataSet_3``, and 77-100 % of its control
+    block and dataset names end in a digit. So the suffix stayed.
+
+    **The PREFIX is where the two deliberately differ.**
+    `unique_element_name` puts ``new`` in front, because it invents a name
+    from nothing and a placeholder should announce itself. This starts from
+    the source's own `id`, which is already meaningful and already the
+    engineer's: prefixing ``SEL_LLN0_V01`` to ``newSEL_LLN0_V01`` would lose
+    the only thing that makes the imported type recognisable. A17b considered
+    unifying them and kept the difference for that reason.
     """
     stem = id_ or kind
-    n = 1
+    n = SUFFIX_START
     while True:
         candidate = f"{stem}_{n}"
         if (kind, candidate) not in taken:

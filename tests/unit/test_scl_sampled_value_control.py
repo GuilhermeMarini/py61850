@@ -223,9 +223,19 @@ class TestCreate(_Base):
         self.assertIsNone(
             _named(doc, "SampledValueControl", "SV2").get("confRev"))
 
-    def test_a_missing_name_is_refused(self):
+    def test_no_name_allocates_the_references_documented_default(self):
+        """**A17b flipped half of this.** *"a unique name starting with
+        `newSampledValueControl_xx` is set"* is the reference's own sentence.
+        An empty name still raises."""
         doc = self.doc()
-        with self.assertRaisesRegex(EditRejected, "A17"):
+        before = [s.get("name")
+                  for s in iter_local(doc.root, "SampledValueControl")]
+        doc.apply_edit(create_sampled_value_control(doc, self.ln0(doc)))
+        self.assertEqual(
+            before + ["newSampledValueControl"],
+            [s.get("name")
+             for s in iter_local(doc.root, "SampledValueControl")])
+        with self.assertRaisesRegex(EditRejected, "empty name"):
             create_sampled_value_control(doc, self.ln0(doc), "")
 
     def test_a_name_already_used_is_refused(self):

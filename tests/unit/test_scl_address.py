@@ -71,16 +71,19 @@ class TestCreateSmv(_Base):
         self.assertEqual(len(edits), 1)
         self.assertIsInstance(edits[0], Insert)
 
-    def test_an_smv_with_no_address_is_valid_and_is_what_is_written(self):
-        """`tControlBlock` declares `Address` with `minOccurs="0"`, so an
-        `SMV` naming only its control block is valid SCL -- and it is the
-        shape that waits for A17's MAC and APPID generators rather than
-        inventing them now."""
+    def test_an_smv_given_nothing_allocates_from_the_sampled_value_band(self):
+        """**A17b changed this.** An `SMV` naming only its control block is
+        still valid SCL -- `Address` is `minOccurs="0"` -- but it is no longer
+        what this writes, and the values come from the SMV prefix and band
+        rather than the GOOSE ones."""
         doc = self.doc()
         doc.apply_edit(create_smv(doc, self.ap(doc), "MU", "SV1"))
-        address = next(iter_local(doc.root, "SMV"))
-        self.assertEqual(list(address), [])
-        self.assertEqual((address.get("ldInst"), address.get("cbName")),
+        smv = next(iter_local(doc.root, "SMV"))
+        self.assertEqual([strip_ns(c.tag) for c in smv], ["Address"])
+        self.assertEqual(
+            [(p.get("type"), p.text) for p in smv[0]],
+            [("MAC-Address", "01-0C-CD-04-00-00"), ("APPID", "4000")])
+        self.assertEqual((smv.get("ldInst"), smv.get("cbName")),
                          ("MU", "SV1"))
 
     def test_the_p_elements_are_written_in_the_references_option_order(self):
@@ -95,13 +98,17 @@ class TestCreateSmv(_Base):
         self.assertEqual([p.get("type") for p in address],
                          ["MAC-Address", "APPID", "VLAN-ID", "VLAN-PRIORITY"])
 
-    def test_only_the_values_given_are_written(self):
+    def test_only_the_values_with_no_generator_are_left_out(self):
+        """**A17b narrowed this.** The MAC is allocated because A17 ships a
+        generator for it; the two VLAN values have none and are still written
+        only when given."""
         doc = self.doc()
         doc.apply_edit(create_smv(doc, self.ap(doc), "MU", "SV1",
                                   app_id="4000"))
         address = next(iter_local(next(iter_local(doc.root, "SMV")), "Address"))
         self.assertEqual([(p.get("type"), p.text) for p in address],
-                         [("APPID", "4000")])
+                         [("MAC-Address", "01-0C-CD-04-00-00"),
+                          ("APPID", "4000")])
 
     def test_no_xsi_type_is_written(self):
         """A12 shipped this shape and A11 keeps it, on the corpus reason
@@ -166,14 +173,19 @@ class TestCreateGse(_Base):
         self.assertEqual(len(edits), 1)
         self.assertIsInstance(edits[0], Insert)
 
-    def test_a_gse_with_no_address_and_no_times_is_valid_and_is_written(self):
-        """`Address`, `MinTime` and `MaxTime` are all `minOccurs="0"`. It is
-        the one shape here the corpus never contains -- 146 of 146 carry all
-        three -- and it is what waits for A17's generators."""
+    def test_a_gse_given_nothing_allocates_its_address_and_writes_no_times(self):
+        """**A17b changed this.** It used to write a `GSE` with no children at
+        all -- valid SCL, `minOccurs="0"` on all three, and the one shape the
+        corpus never contains (146 of 146 carry all three). Now the two values
+        that have a generator are allocated and the two times, which have
+        none, are still written only when asked."""
         doc = self.doc()
         doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1"))
         gse = next(iter_local(doc.root, "GSE"))
-        self.assertEqual(list(gse), [])
+        self.assertEqual([strip_ns(c.tag) for c in gse], ["Address"])
+        self.assertEqual(
+            [(p.get("type"), p.text) for p in gse[0]],
+            [("MAC-Address", "01-0C-CD-01-00-00"), ("APPID", "0000")])
         self.assertEqual(gse.get("ldInst"), "PRO")
         self.assertEqual(gse.get("cbName"), "GCB1")
 
@@ -185,7 +197,7 @@ class TestCreateGse(_Base):
                                   min_time="4", max_time="1000"))
         gse = next(iter_local(doc.root, "GSE"))
         self.assertEqual([(strip_ns(c.tag), c.get("unit"),
-                           c.get("multiplier"), c.text) for c in gse],
+                           c.get("multiplier"), c.text) for c in gse[1:]],
                          [("MinTime", "s", "m", "4"),
                           ("MaxTime", "s", "m", "1000")])
 
@@ -194,7 +206,10 @@ class TestCreateGse(_Base):
         doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1",
                                   max_time="1000"))
         gse = next(iter_local(doc.root, "GSE"))
-        self.assertEqual([strip_ns(c.tag) for c in gse], ["MaxTime"])
+        # The Address is allocated; only the time that was given is written,
+        # because neither time has a generator.
+        self.assertEqual([strip_ns(c.tag) for c in gse],
+                         ["Address", "MaxTime"])
 
     def test_the_children_are_in_the_schema_s_order(self):
         """`tGSE` extends `tControlBlock`, so the sequence is `Address`,
@@ -216,13 +231,20 @@ class TestCreateGse(_Base):
                                   "Address"))
         self.assertEqual([p.get("type") for p in address], list(P_TYPES))
 
-    def test_only_the_values_given_are_written(self):
+    def test_only_the_values_with_no_generator_are_left_out(self):
+        """**A17b narrowed this.** `MAC-Address` and `APPID` are allocated
+        when absent; `VLAN-ID` and `VLAN-PRIORITY` have no generator and are
+        still written only when given. The line is exactly which two A17
+        ships a generator for."""
         doc = self.doc()
         doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1",
                                   app_id="3001"))
         address = next(iter_local(next(iter_local(doc.root, "GSE")),
                                   "Address"))
-        self.assertEqual([p.get("type") for p in address], ["APPID"])
+        self.assertEqual([p.get("type") for p in address],
+                         ["MAC-Address", "APPID"])
+        # An explicit value is never second-guessed.
+        self.assertEqual("3001", address[1].text)
 
     def test_no_xsi_type_is_written_by_default(self):
         doc = self.doc()
@@ -242,7 +264,8 @@ class TestCreateGse(_Base):
                                   app_id="3001", inst_type=True))
         address = next(iter_local(next(iter_local(doc.root, "GSE")),
                                   "Address"))
-        self.assertEqual(address[0].get(XSI_TYPE), "tP_APPID")
+        self.assertEqual([p.get(XSI_TYPE) for p in address],
+                         ["tP_MAC-Address", "tP_APPID"])
         self.assertIn(b'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
                       doc.to_bytes())
 
@@ -521,7 +544,10 @@ class TestInstType(_Base):
                    for tag in ("GSE", "SMV")
                    for p in next(iter_local(next(iter_local(doc.root, tag)),
                                             "Address"))]
-        self.assertEqual(written, ["tP_APPID", "tP_APPID"])
+        # Four, not two: A17b allocates the MAC alongside the given APPID,
+        # and the one rule still reaches every `P` either way.
+        self.assertEqual(written, ["tP_MAC-Address", "tP_APPID",
+                                   "tP_MAC-Address", "tP_APPID"])
 
     def test_setting_it_is_invertible_bytes_and_declaration_alike(self):
         doc = self.doc(addressed(order=("MAC_Address",)))
@@ -907,3 +933,87 @@ class TestCorpus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAllocatedAddress(_Base):
+    """**A17b**: `mac` and `app_id` are allocated when not given.
+
+    The reference does not document this either way -- `CreateGSEOptions.mac`
+    says only *"MAC-Address within `P` element"* -- so it is a decision rather
+    than a port, and Q39 §1 argues it against `insert_ied`'s refusal to invent
+    a device name.
+    """
+
+    def address_of(self, doc, tag):
+        return [(p.get("type"), p.text)
+                for p in next(iter_local(next(iter_local(doc.root, tag)),
+                                         "Address"))]
+
+    def test_an_explicit_value_is_never_second_guessed(self):
+        doc = self.doc()
+        doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1",
+                                  mac="01-0C-CD-01-AB-CD", app_id="3FFF"))
+        self.assertEqual([("MAC-Address", "01-0C-CD-01-AB-CD"),
+                          ("APPID", "3FFF")], self.address_of(doc, "GSE"))
+
+    def test_an_explicit_value_already_in_use_is_still_written(self):
+        """Allocation fills a gap the caller left; it does not police one the
+        caller filled. `change_gse_or_smv_address` is where a clash is the
+        caller's to see."""
+        doc = self.doc(station(aps=[fx.connected_ap(
+            "MU1", "S1", fx.gse("PRO", "G0", addr=fx.address(
+                MAC_Address="01-0C-CD-01-00-00", APPID="0000")))]))
+        doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1",
+                                  mac="01-0C-CD-01-00-00"))
+        gse = [g for g in iter_local(doc.root, "GSE")
+               if g.get("cbName") == "GCB1"][0]
+        self.assertEqual("01-0C-CD-01-00-00", gse[0][0].text)
+        # ...and the APPID it did NOT give is allocated around what is used.
+        self.assertEqual("0001", gse[0][1].text)
+
+    def test_allocation_reads_what_the_document_already_holds(self):
+        doc = self.doc(station(aps=[fx.connected_ap(
+            "MU1", "S1", fx.gse("PRO", "G0", addr=fx.address(
+                MAC_Address="01-0C-CD-01-00-00", APPID="0000")))]))
+        doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1"))
+        gse = [g for g in iter_local(doc.root, "GSE")
+               if g.get("cbName") == "GCB1"][0]
+        self.assertEqual([("MAC-Address", "01-0C-CD-01-00-01"),
+                          ("APPID", "0001")],
+                         [(p.get("type"), p.text) for p in gse[0]])
+
+    def test_two_creates_in_one_compound_edit_need_the_batch_record(self):
+        """**The hazard, from the caller's side.** Inside one compound edit
+        the document does not yet hold the first address when the second is
+        computed -- Q33 §9, and the reason `taken` is public at all. Without
+        it both GSEs get the same MAC; with it they do not."""
+        doc = self.doc(station(aps=[fx.connected_ap("MU1", "S1"),
+                                    fx.connected_ap("MU2", "S1")]))
+        aps = list(iter_local(doc.root, "ConnectedAP"))
+
+        collided = (create_gse(doc, aps[0], "PRO", "G1")
+                    + create_gse(doc, aps[1], "PRO", "G2"))
+        undo = doc.apply_edit(collided)
+        macs = [g[0][0].text for g in iter_local(doc.root, "GSE")]
+        self.assertEqual(macs[0], macs[1])      # the hazard, demonstrated
+        doc.apply_edit(undo)
+
+        claimed = set()
+        edits = []
+        for ap in aps:
+            new = create_gse(doc, ap, "PRO", "G1", taken=claimed)
+            claimed.update(p.text for p in new[0].node[0])
+            edits += new
+        doc.apply_edit(edits)
+        macs = [g[0][0].text for g in iter_local(doc.root, "GSE")]
+        self.assertEqual(2, len(set(macs)))
+        self.assertEqual(["01-0C-CD-01-00-00", "01-0C-CD-01-00-01"],
+                         sorted(macs))
+
+    def test_it_is_still_one_history_entry_and_inverts(self):
+        doc = self.doc()
+        before = doc.to_bytes()
+        undo = doc.apply_edit(create_gse(doc, self.ap(doc), "PRO", "GCB1"))
+        self.assertNotEqual(before, doc.to_bytes())
+        doc.apply_edit(undo)
+        self.assertEqual(before, doc.to_bytes())

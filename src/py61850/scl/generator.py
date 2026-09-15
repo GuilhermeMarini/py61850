@@ -127,8 +127,16 @@ selects ``./*`` and a `Bay` collides with a `PowerTransformer` of that name --
 and the difference is written in the XSD rather than inferred, so this
 function counts same-tag siblings and nothing else.
 
-**The pattern is the corpus's own**, not an invention. Vendors already write
-the stem and then a numeric suffix:
+**The prefix is the reference's and the suffix is the corpus's.** Three of the
+functions that call the reference's allocator document what it produces --
+*"a unique name starting with `newReportControl_xx`"* -- and A17 missed it by
+reading the allocator's own one-line declaration and the corpus instead. Q39
+§0 carries the correction and the reason the corpus could not settle it: a
+placeholder is renamed before a file ships, so **0 of its 1,309 names begin
+with `new`** and that is what the convention predicts.
+
+What the corpus does settle is the SUFFIX. Vendors already write a stem and
+then a numeric one:
 
 - `siemens.scd` carries a `DataSet` named literally ``DataSet``, then
   ``DataSet_1``, ``DataSet_2``, ``DataSet_3``;
@@ -209,6 +217,22 @@ LN_INST_RANGE = (1, 99)
 #: *"`inst` or `lnInst`"*. `LN0` is absent because it has neither -- there is
 #: exactly one per `LDevice` and it is identified by its class.
 LN_INST_ELEMENTS = {"LN": "inst", "LNode": "lnInst"}
+
+#: What :func:`unique_element_name` puts in front of the tag. **The
+#: reference's**, documented on the three functions that call its allocator
+#: rather than on the allocator itself: *"When missing a unique name starting
+#: with `newReportControl_xx` is set"*. A placeholder that announces itself as
+#: one is the whole point, and the corpus cannot referee it -- 0 of its 1,309
+#: control-block and dataset names begin with this, which is what the
+#: convention predicts rather than evidence against it.
+ALLOCATED_NAME_PREFIX = "new"
+
+#: The first numeric suffix an allocated name or id takes. Measured rather
+#: than chosen: `siemens.scd` writes ``DataSet``, ``DataSet_1``, ``DataSet_2``,
+#: ``DataSet_3`` and `mixed.scd` ``A_URCB`` through ``A_URCB_4``.
+#: `data_types.py`'s `_fresh_id` shares it, which is what stops the two
+#: allocators drifting apart on the half they agree about.
+ALLOCATED_NAME_SUFFIX_START = 1
 
 _MAC_OCTET_RANGE = (0x0000, 0xFFFF)
 
@@ -413,16 +437,55 @@ def next_ln_inst(parent, tag, ln_class, taken=()) -> str:
 
 # -- element names ----------------------------------------------------------
 
+def _allocated_name(parent, tag, name, taken=()):
+    """``name`` if the caller gave one, an allocated one if it gave ``None``.
+
+    The rule the three `create_*` functions share, spelled once here rather
+    than three times with three chances to drift -- Q25's rule, and the same
+    reason `supervision.py` reaches across for `data_set`'s `_limit`.
+
+    **``None`` and ``""`` are deliberately different.** ``None`` is "choose one
+    for me"; an empty string is a caller that computed a name and got nothing,
+    which is a bug in the caller and is surfaced rather than papered over. The
+    refusal the three functions carried before A17b is therefore still
+    reachable and still means something, which is why it was rewritten rather
+    than deleted.
+    """
+    if name is None:
+        return unique_element_name(parent, tag, taken)
+    if not name:
+        raise EditRejected(
+            f"a {tag} needs a name -- it is required by the schema and unique "
+            f"within its logical node. Pass name=None to have one allocated; "
+            f"an empty name is a caller that computed one and got nothing")
+    return name
+
+
 def unique_element_name(parent, tag, taken=()) -> str:
     """A `name` no ``tag`` child of ``parent`` carries.
 
-    The stem is the tag itself and the suffix is ``_1``, ``_2`` and so on --
-    **the corpus's own convention, not an invention**. `siemens.scd` carries a
-    `DataSet` named literally ``DataSet`` followed by ``DataSet_1``,
-    ``DataSet_2`` and ``DataSet_3``; `mixed.scd` carries ``A_URCB`` through
-    ``A_URCB_4``. It is also exactly what `data_types.py`'s `_fresh_id`
-    already does for type ids, so publishing it here is what stops the two
-    drifting.
+    The stem is :data:`ALLOCATED_NAME_PREFIX` + the tag and the suffix is
+    ``_1``, ``_2`` and so on, so a `DataSet` allocated here is ``newDataSet``
+    and then ``newDataSet_1``. **The prefix is the reference's**, documented
+    on the three functions that call its allocator rather than on the
+    allocator itself -- *"When missing a unique name starting with
+    `newReportControl_xx` is set"*, and the same sentence for
+    `newSampledValueControl_xx` and `newGSEControl_xx`.
+
+    **A17 shipped this without the prefix and Q39 §0 has the correction.** It
+    read `uniqueElementName.d.ts`, which is one line and carries no pattern,
+    and took the shape from the corpus instead: `siemens.scd` really does
+    carry a `DataSet` named ``DataSet`` followed by ``DataSet_1``,
+    ``DataSet_2`` and ``DataSet_3``, and 77-100 % of the corpus's control
+    block and dataset names end in a digit.
+
+    **But the corpus cannot referee this particular question**, which is the
+    part worth keeping. Of its 1,309 such names, **zero** begin with ``new``
+    -- and that is exactly what the convention predicts, because a placeholder
+    is renamed before a file ships. The corpus measures finished
+    configurations; an allocator produces something an engineer is meant to
+    replace, and a name that announces itself as auto-created is the point.
+    ``ReportControl_1`` is indistinguishable from a deliberate name.
 
     **Same-tag siblings only**, which is narrower than it looks and is the
     schema's: ``uniqueDataSetInLN0`` selects ``./scl:DataSet`` and
@@ -445,9 +508,10 @@ def unique_element_name(parent, tag, taken=()) -> str:
             f"{type(parent).__name__}")
     used = {child.get("name") for child in _children(parent, tag)}
     used |= {str(value) for value in taken}
-    if tag not in used:
-        return tag
-    suffix = 1
-    while f"{tag}_{suffix}" in used:
+    stem = ALLOCATED_NAME_PREFIX + tag
+    if stem not in used:
+        return stem
+    suffix = ALLOCATED_NAME_SUFFIX_START
+    while f"{stem}_{suffix}" in used:
         suffix += 1
-    return f"{tag}_{suffix}"
+    return f"{stem}_{suffix}"

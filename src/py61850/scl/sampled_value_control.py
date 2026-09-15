@@ -122,6 +122,7 @@ from .control_block import (
 )
 from .data_set import _limit, _namespace, _services_child
 from .document import strip_ns
+from .generator import _allocated_name
 from .edit import EditRejected, Insert, SetAttributes
 from .extref import _ancestor, _ied_name, _qualify, _same
 from .ordering import may_contain, reference_for
@@ -186,14 +187,15 @@ def _count_under(scope) -> int:
 
 # -- element creation -------------------------------------------------------
 
-def create_sampled_value_control(doc, parent, name, desc=None, dat_set=None,
+def create_sampled_value_control(doc, parent, name=None, desc=None,
+                                 dat_set=None,
                                  smv_id=None, multicast=None,
                                  smp_rate=DEFAULT_SMP_RATE,
                                  nof_asdu=DEFAULT_NOF_ASDU, smp_mod=None,
                                  security_enable=None, conf_rev="1",
                                  smv_opts=None, ap_name=None, mac=None,
                                  app_id=None, vlan_id=None, vlan_priority=None,
-                                 force=False) -> List:
+                                 force=False, taken=()) -> List:
     """The edits that add a `SampledValueControl` and address it.
 
     ``parent`` is an `LN0`, or an `LDevice`, `AccessPoint` or `IED` whose
@@ -209,9 +211,18 @@ def create_sampled_value_control(doc, parent, name, desc=None, dat_set=None,
     block, and the `SMV` when the IED has a `ConnectedAP` to carry it. Both
     are one compound edit and one history entry.
 
-    ``name`` is required, for Q27's reason, and ``force`` skips the `SMVsc`
-    guard and the `datSet` resolution check as the reference's `skipCheck`
-    does.
+    **``name`` is optional since A17b**, and ``None`` asks for one:
+    ``newSampledValueControl``, then ``newSampledValueControl_1``. That prefix
+    is the reference's own documented default -- *"a unique name starting with
+    `newSampledValueControl_xx`"* -- which Q39 §0 records A17 as having
+    missed. An empty string still raises, where ``None`` is a request.
+
+    **``force`` skips the guards and never the allocation.** The reference's
+    `skipCheck` turns the unique-name check off; ours keeps allocating,
+    because a caller forcing past an `SMVsc` limit has said nothing about
+    names and an element with no `name` is invalid SCL rather than merely
+    unguarded. ``force`` skips the `SMVsc` guard and the `datSet` resolution
+    check, as before.
 
     Raises :class:`~py61850.scl.EditRejected` if ``parent`` has no `LN0`, if
     ``name`` is empty or already used in the logical node, if ``dat_set``
@@ -226,11 +237,7 @@ def create_sampled_value_control(doc, parent, name, desc=None, dat_set=None,
         raise EditRejected(
             f"{shown} may not hold a SampledValueControl and no LN0 was found "
             f"beneath it; 61850-6 places one on LN0 and nowhere else")
-    if not name:
-        raise EditRejected(
-            "a SampledValueControl needs a name -- it is required by the "
-            "schema and unique within its logical node; allocating one is "
-            "A17's")
+    name = _allocated_name(parent, "SampledValueControl", name, taken)
     clash = _name_clash(node, name)
     if clash is not None:
         raise EditRejected(
