@@ -22,12 +22,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The whole supported range, which `requires-python = ">=3.13"` makes
+        # two versions rather than six as of 0.5.0. A matrix that started above
+        # the declared floor would leave the oldest supported Python untested.
         os: [ubuntu-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.13", "3.14"]
         include:
           # Applications built on this library run on Windows, so cover both
-          # ends of the supported range there rather than Linux only.
-          - { os: windows-latest, python: "3.9" }
+          # ends of the supported range there rather than Linux only. The range
+          # is narrower than it was and the rule is unchanged: 3.13 and 3.14
+          # are still both ends of it.
+          - { os: windows-latest, python: "3.13" }
           - { os: windows-latest, python: "3.14" }
           - { os: macos-latest, python: "3.14" }
     steps:

@@ -119,10 +119,34 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Cut this version's section out of CHANGELOG.md
+        # The release body IS the changelog entry, not a second account of the
+        # same release written in a web form. `--generate-notes` produced a
+        # commit list, which says what was touched and never what changed.
+        # Refusing to fall back to an empty body is deliberate: a tag whose
+        # version is missing from CHANGELOG.md is a version nobody wrote up.
+        #
+        # `python3`, not `python`: this job deliberately runs no
+        # `setup-python` -- it only needs `gh` and the artefacts -- and the
+        # unversioned `python` name is not guaranteed on the runner image.
+        run: |
+          python3 - <<'EOF'
+          import pathlib, re, sys
+          version = "${{ github.ref_name }}".removeprefix("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          m = re.search(rf"^## {re.escape(version)} .*?$(.*?)(?=^## |\Z)",
+                        text, re.M | re.S)
+          if not m or not m.group(1).strip():
+              sys.exit(f"::error::CHANGELOG.md has no section for {version}")
+          pathlib.Path("RELEASE_NOTES.md").write_text(m.group(1).strip() + "\n",
+                                                      encoding="utf-8")
+          print(f"release notes: {len(m.group(1).strip().splitlines())} lines")
+          EOF
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" dist/*
           --title "$GITHUB_REF_NAME"
-          --generate-notes
+          --notes-file RELEASE_NOTES.md
