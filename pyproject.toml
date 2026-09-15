@@ -5,9 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "py61850"
 dynamic = ["version"]
-description = "Pure-Python IEC 61850 toolkit — MMS (ISO 9506) client today; GOOSE and SV planned. Standard library only."
+description = "Pure-Python IEC 61850 toolkit — an MMS (ISO 9506) client, and an SCL reader/writer/editor with a byte-faithful round trip. Standard library only."
 readme = "README.md"
-requires-python = ">=3.9"
+# 3.13, raised from 3.9 in 0.5.0, for two reasons that are not the same kind of
+# reason and are recorded separately in CHANGELOG.md. 3.9 reached end of life in
+# October 2025 and 3.10 does so in October 2026 -- that half is a date. 3.11 and
+# 3.12 are still supported and were dropped for BREADTH: six interpreters is
+# more compatibility surface than a library whose consumers all move together
+# has reason to carry, and that half is a judgement. Raising a floor cannot
+# break code that already runs -- a resolver on 3.12 is served 0.4.0 and never
+# a failure -- which is why it travels in a MINOR release.
+requires-python = ">=3.13"
 license = "AGPL-3.0-or-later"
 # NOTICE-IEC.txt travels with every wheel and sdist because two generated files
 # are derived from IEC code components, whose licence requires the notice, the
@@ -21,10 +29,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
@@ -37,7 +41,12 @@ dependencies = []  # zero runtime dependencies — keep it that way
 Homepage = "https://github.com/GuilhermeMarini/py61850"
 Repository = "https://github.com/GuilhermeMarini/py61850"
 Issues = "https://github.com/GuilhermeMarini/py61850/issues"
-Changelog = "https://github.com/GuilhermeMarini/py61850/blob/main/ROADMAP.md"
+# ROADMAP.md until 0.5.0, which is the defect this moved: there was a Changelog
+# link and no changelog behind it, so 0.4.0's notes exist only in a GitHub
+# release body that cannot be diffed or installed. ROADMAP.md is forward-looking
+# and keeps its own link below.
+Changelog = "https://github.com/GuilhermeMarini/py61850/blob/main/CHANGELOG.md"
+Roadmap = "https://github.com/GuilhermeMarini/py61850/blob/main/ROADMAP.md"
 
 [project.scripts]
 py61850 = "py61850.cli.main:main"
@@ -53,8 +62,9 @@ path = "src/py61850/__init__.py"
 packages = ["src/py61850"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "examples", "README.md", "ROADMAP.md", "LICENSE",
-           "NOTICE-IEC.txt", "COMMERCIAL.md", "CONTRIBUTING.md", "CLA.md"]
+include = ["src", "tests", "examples", "README.md", "ROADMAP.md", "CHANGELOG.md",
+           "LICENSE", "NOTICE-IEC.txt", "COMMERCIAL.md", "CONTRIBUTING.md",
+           "CLA.md"]
 # The SCL round-trip corpus is 44 MB of real vendor SCDs -- a development
 # artefact, not something an installer needs. Shipping it would grow the sdist
 # of a zero-dependency standard-library package by ~2.3 MB compressed and buy

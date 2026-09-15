@@ -9,6 +9,8 @@ venv/
 downloads/
 relay_files/
 inventory.csv
+# Written by release.yml, from CHANGELOG.md, to be the GitHub release body.
+RELEASE_NOTES.md
 
 # SCL / IED capability files (vendor-supplied, large, not redistributable)
 *.icd

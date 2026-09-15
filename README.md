@@ -10,8 +10,14 @@ TCP → TPKT (RFC1006) → COTP (ISO8073) → ISO Session → ISO Presentation
     → ACSE (AARQ/AARE) → MMS (Initiate + confirmed services)
 ```
 
+It is also a **61850-6 (SCL) toolkit**: `py61850.scl` reads an `.scd`/`.cid`/
+`.icd` into a general object model, **changes** it through an edit layer whose
+every operation is invertible, and writes it back **byte for byte** where it did
+not touch. That half needs no relay and no network at all.
+
 See [ROADMAP.md](ROADMAP.md) for what's next (an MMS sniffer, MMS simulation
-from SCL, and a GOOSE sniff/publish interface).
+from SCL, and a GOOSE sniff/publish interface), and
+[CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## What this library is for
 
@@ -40,11 +46,12 @@ Concretely, that means three things for any change here:
 pip install -e .          # from a checkout (editable)
 # or, once published/tagged:
 # pip install py61850
-# pip install "git+https://github.com/OWNER/py61850@v0.1.0"
+# pip install "git+https://github.com/OWNER/py61850@v0.5.0"
 ```
 
-Requires Python ≥ 3.9. Installs `py61850` (subcommands) plus `mms-scan` and
-`mms-files` for the two MMS drivers directly.
+Requires **Python ≥ 3.13** (raised from 3.9 in 0.5.0 — see
+[CHANGELOG.md](CHANGELOG.md) for both reasons). Installs `py61850`
+(subcommands) plus `mms-scan` and `mms-files` for the two MMS drivers directly.
 
 ## Use as a library
 
@@ -147,6 +154,53 @@ That guarantee is the point of the write side. The file goes back into DIGSI
 and SEL Architect, and a library that reformats the 99 % of an SCD it did not
 touch turns every save into a whole-file diff.
 
+### Changing it — the edit layer
+
+Since 0.5.0 a document can also be **edited**, and every edit is invertible.
+Four primitives (`Insert`, `Remove`, `SetAttributes`, `SetTextContent`) each
+compute their inverse *before* they apply; a list of them is itself an edit,
+applied in order and inverted in reverse. On top of those sit the IEC 61850-6
+rules that decide what may be created where, what a rename has to drag along,
+and where in a parent a new element belongs.
+
+```python
+from py61850.scl import SclDocument, Connection, subscribe
+
+doc = SclDocument.parse("station.scd")
+
+sink  = doc.ied("QMA1_MU1").ext_refs()[2]            # an input awaiting a source
+block = doc.ied("TR01_2414").control_blocks()[3]     # the GOOSE that publishes it
+fcda  = block.logical_node.data_sets[block.dat_set].fcdas[12]
+
+edits = subscribe(doc, [Connection(sink=sink.element,
+                                   fcda=fcda.element,
+                                   control_block=block.element)])
+
+undo = doc.apply_edit(edits)     # ONE history entry, however many edits it is
+doc.write("station.scd")
+doc.apply_edit(undo)             # restores the document exactly
+```
+
+Three things hold the layer together:
+
+- **Every function returns everything you should apply, input edit first.** One
+  rule, one `apply_edit` call, one undo entry — so "subscribe this ExtRef",
+  which may touch an `ExtRef`, an `Inputs` and a supervision logical node in
+  three places, is one step in a caller's history.
+- **The edit functions take `xml.etree` elements, not the model objects.** The
+  model is how you find things and `.element` is what you pass; that is what
+  lets an edit reach a part of the file the read model does not cover.
+- **A rejected edit changes nothing.** Guards raise `EditRejected` before the
+  tree is touched, so there is no half-applied state — the same rule the round
+  trip depends on.
+
+`py61850.scl.__all__` is 132 names across the areas it can edit: control blocks
+and datasets, GSE/SMV addresses, report and sampled-value control, IEDs and the
+rename fan-out, subscription supervision, `DataTypeTemplates` import and merge,
+the `Substation` section, and the allocators for MAC addresses, APPIDs and
+instance numbers. `CHANGELOG.md` lists them by area, says where this diverges
+from OpenSCD and — more usefully — what it does **not** implement.
+
 `py61850.scl` is imported explicitly and is never pulled in by `import
 py61850`, so the MMS client keeps installing and running unprivileged.
 
@@ -177,6 +231,9 @@ use one client per thread.
 | `folder_of` | the folder part of an MMS file name, for grouping search hits |
 | `Iec61850Error` | base of `TransportError`, `MmsError`, and the reserved `LinkError` / `GooseError` / `SvError` / `SclError` |
 | `decode_read_response`, `decode_data_definition`, `decode_service_error` | TLV decoders |
+
+`py61850.scl` has a public surface of its own — 132 names, imported from
+`py61850.scl` rather than from `py61850` — and the two do not overlap.
 
 Everything else — `core.ber`, `mms.pdu`, `osi.*`, `CotpTransport` — is internal
 and may change between releases.
@@ -269,7 +326,14 @@ src/py61850/
 ├── link/               # packet-capture sources — planned (ROADMAP 0.2, 2.0)
 ├── goose/              # GOOSE pub/sub — planned (ROADMAP 2.0)
 ├── sv/                 # Sampled Values — planned (after GOOSE)
-├── scl/                # SCL parsing — planned (ROADMAP 1.0)
+├── scl/                # IEC 61850-6: read, edit, write. The largest package
+│   │                   #   here, and never imported by `py61850` itself
+│   ├── document.py     #   SclDocument: parse, the byte-faithful write, edits
+│   ├── model.py        #   the instance tree, built per IED on demand
+│   ├── templates.py    #   DataTypeTemplates resolved once per document
+│   ├── edit.py         #   the four primitives, each inverted before it applies
+│   ├── ordering.py     #   where a new element goes, from the content models
+│   └── …               #   one module per 61850-6 area it can edit
 └── cli/
     ├── main.py         # `py61850` — subcommand dispatcher
     ├── scan.py         # `mms-scan` — data-model scan driver

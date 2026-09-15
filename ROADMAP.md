@@ -141,6 +141,47 @@ is new is that a document can go back out as the file it came from.
 
 ---
 
+## 0.5 — The SCL edit layer ✅
+
+The reader becomes an editor. 0.3 gave the object model and 0.4 the byte-faithful
+round trip; this puts an edit layer between them, so a document can be **changed**
+and the change undone exactly.
+
+- ✅ **Four invertible primitives** — `Insert`, `Remove`, `SetAttributes`,
+      `SetTextContent`, each computing its inverse from the tree **before** it
+      applies rather than re-deriving it after. A list of edits is itself an
+      edit: applied in order, inverted in reverse, which is what makes a
+      six-element operation one undo step. `ElementTree` has no parent
+      pointers, so the applier maintains a parent map and is the only thing
+      that changes the tree.
+- ✅ **A property test over generated edit sequences** — `undo(apply(e))`
+      restores the document **byte-identically**, compared at the level of
+      serialised output so it composes with 0.4's round-trip guarantee.
+- ✅ **Schema-ordered insertion** — table-driven from the SCL content models, so
+      a created element lands where the schema says it belongs rather than at
+      the end of its parent. A vendor tool that validates on open is the reason
+      this is not cosmetic.
+- ✅ **The 61850-6 rules**, area by area: control blocks and `confRev`;
+      datasets and FCDAs; GSE/SMV addresses; report and sampled-value control
+      with their instance limits; IEDs, including a rename that follows every
+      reference embedding the name across six element names; subscription
+      supervision (`LGOS`/`LSVS`) with instance allocation;
+      `DataTypeTemplates` import and merge with a three-way conflict policy;
+      the `Substation` section; and allocators for MAC addresses, APPIDs,
+      `inst` numbers and element names.
+- ✅ **`py61850.scl.__all__` goes 31 → 132 names, none removed and none changed
+      in meaning** — measured one name at a time against the 0.4.0 surface, not
+      asserted. See `CHANGELOG.md`.
+- ✅ **Minimum Python raised to 3.13.** Two separate reasons, one a date and one
+      a judgement; `CHANGELOG.md` states both.
+
+`open-scd-core` and `scl-lib` are the behavioural reference throughout, and the
+places this diverges are written down rather than left to be discovered — as is
+the shorter and more important list of what it does **not** implement. Both are
+in `CHANGELOG.md`.
+
+---
+
 ## 1.0 — MMS simulation 🧭
 
 **Goal:** read an SCL file (`.scd` / `.cid` / `.icd`) and stand up a virtual IED
@@ -160,8 +201,14 @@ image of today's client.
       this model, and the GOOSE publisher builds frames from the GoCB and
       dataset in the same model.
 
-      Not modelled, because no file in the reference corpus carries them: the
-      `Substation` section and `Log`.
+      **No READ MODEL** for the `Substation` section or `Log`, because no file
+      in the reference corpus carries them. Since 0.5.0 the `Substation`
+      section nevertheless has an EDIT layer — `update_substation`,
+      `update_voltage_level`, `update_bay`, `remove_process_element` — which
+      works on the tree directly. The distinction is real and not a hedge: an
+      edit asks the schema what a rename must maintain and is checked against
+      fixtures built by hand, where a read model with nothing to check it
+      against is how a reader acquires confident wrong answers.
 
       **The vendor seam is proven by two unrelated vendors**, which is what
       0.3.0 waited for rather than shipping on its author's word. Two
