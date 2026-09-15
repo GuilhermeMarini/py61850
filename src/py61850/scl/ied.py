@@ -858,17 +858,25 @@ def insert_ied(doc, source, names, on_conflict="refuse",
     namespace mismatch.
 
     **A name the target already holds is REFUSED rather than renamed**, which
-    is the second divergence: the reference checks nothing. Three reasons, and
-    the last is the one that decides it. :func:`update_ied` refuses a rename
-    that collides and two functions in one module cannot answer the same
-    collision differently. Renaming would need an allocator, and allocation
-    policy is A17's by name -- Q34 §3 already conceded `_fresh_id` as a
-    placeholder to be replaced there rather than competed with. And **an IED
-    name is not a type id**: a type id is bookkeeping nothing outside the file
+    is the second divergence: the reference checks nothing.
+
+    **Two reasons, where Q35 §4 gave three.** The middle one was "renaming
+    would need an allocator, and allocation policy is A17's by name" -- and
+    A17 shipped :func:`~py61850.scl.unique_element_name`, so that ground is
+    spent and is deleted here rather than left pointing at a phase that has
+    happened. A17b reconsidered the refusal with the allocator in hand and
+    kept it, on the two that remain:
+
+    :func:`update_ied` refuses a rename that collides, and two functions in
+    one module cannot answer the same collision differently. And **an IED name
+    is not a type id**: a type id is bookkeeping nothing outside the file
     knows, while a device name is on the relay, in the RDB and on the panel
-    door. Inventing one for the engineer is exactly the silent choice
-    ``on_conflict`` exists to prevent. The caller's remedy is one call they
-    already have -- insert, then :func:`update_ied`.
+    door -- `sel.scd` and `siemens.scd` share eight of them. Inventing one for
+    the engineer is exactly the silent choice ``on_conflict`` exists to
+    prevent, and it is the same line :func:`~py61850.scl.create_gse` sits on
+    the other side of: a multicast address is station bookkeeping no engineer
+    chooses, so A17b allocates it without asking. The caller's remedy is one
+    call they already have -- insert, then :func:`update_ied`.
     """
     if isinstance(names, str):
         raise EditRejected(

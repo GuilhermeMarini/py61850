@@ -143,6 +143,7 @@ from .control_block import _is_control_block, update_dat_set
 from .controls import CONTROL_BLOCK_TAGS
 from .data_set import _limit, _namespace, _same_ns_children, _services_child
 from .document import strip_ns
+from .generator import _allocated_name
 from .edit import EditRejected, Insert, SetAttributes
 from .extref import _qualify, _same
 from .ordering import may_contain, reference_for
@@ -340,11 +341,11 @@ def _has_data_set(node, name) -> bool:
                for data_set in _same_ns_children(node, "DataSet"))
 
 
-def create_report_control(doc, parent, name, desc=None, dat_set=None,
+def create_report_control(doc, parent, name=None, desc=None, dat_set=None,
                           rpt_id=None, conf_rev="1", buffered=None,
                           buf_time=None, indexed=None, intg_pd=None,
                           trg_ops=None, opt_fields=None, instances=None,
-                          force=False) -> List:
+                          force=False, taken=()) -> List:
     """The edit that adds a new `ReportControl`, with its required `OptFields`.
 
     ``parent`` is an `LN` or `LN0`, or an `LDevice`, `AccessPoint` or `IED`
@@ -358,12 +359,16 @@ def create_report_control(doc, parent, name, desc=None, dat_set=None,
     forces it to ``"1"`` -- the reference's own rule, and the reason
     `TR1_2414`'s declared 22 instances are really 4.
 
-    **`name` is required here, where the reference's is optional.** Filling one
-    in means allocating a unique one, which is A17's `uniqueElementName` and
-    whose policy A17's own row calls a likely divergence; a `create` that
-    invented a name now and changed it at A17 is worse than one that asks.
-    Q27 recorded the same decision for `create_data_set`, and a control block
-    is not different from a dataset in this respect -- `tControl@name` is
+    **`name` is optional since A17b, and ``None`` is what asks for one.**
+    A12 made it required because the allocator was A17's; A17 shipped it and
+    this now calls it, producing ``newReportControl`` and then
+    ``newReportControl_1``. **That prefix is the reference's own documented
+    default** -- *"When missing a unique name starting with
+    `newReportControl_xx` is set"* -- which is the sentence A17 missed by
+    reading the allocator's declaration instead of its callers'. Q39 §0.
+
+    ``""`` still raises: an empty name is a caller whose own computation
+    returned nothing, where ``None`` is a request. `tControl@name` is
     ``use="required"`` exactly as `DataSet@name` is.
 
     ``conf_rev`` defaults to ``"1"``, where the corpus's revision sequence
@@ -387,10 +392,7 @@ def create_report_control(doc, parent, name, desc=None, dat_set=None,
             f"{shown} may not hold a ReportControl and no LN0 was found "
             f"beneath it; expected one of "
             f"{', '.join(REPORT_CONTROL_PARENTS + INDIRECT_PARENTS)}")
-    if not name:
-        raise EditRejected(
-            "a ReportControl needs a name -- it is required by the schema and "
-            "unique within its logical node; allocating one is A17's")
+    name = _allocated_name(parent, "ReportControl", name, taken)
     if not conf_rev:
         raise EditRejected(
             "ReportControl@confRev is use=\"required\" in 61850-6; it cannot "

@@ -556,6 +556,12 @@ class TestInstantiateNewNode(SupervisionCase):
         self.assertIn("already in LDevice", str(caught.exception))
 
     def test_an_exhausted_range_is_refused(self):
+        """**A17b changed the message and the reason is a correction.** It
+        used to end "which is the whole range 61850-6 allows for `tLN@inst`",
+        and 61850-6 allows no such thing: `tLNInst` is ``[0-9]{1,12}`` in both
+        editions. That was the fourth place the false provenance was written
+        down and the only one a caller could ever see. The scan is now
+        `next_ln_inst`'s, so the wording is too."""
         low, high = LN_INST_RANGE
         nodes = tuple(fx.supervision(inst=str(i), cb_ref=f"X/LLN0.C{i}")
                       for i in range(low, high + 1))
@@ -564,7 +570,10 @@ class TestInstantiateNewNode(SupervisionCase):
                           find(doc, "GSEControl", name="GC1"))
         with self.assertRaises(EditRejected) as caught:
             instantiate_supervision(doc, sup, new_supervision_ln=True)
-        self.assertIn("whole range", str(caught.exception))
+        message = str(caught.exception)
+        self.assertIn("in use", message)
+        self.assertIn(f"{low} to {high}", message)
+        self.assertNotIn("61850-6", message)
 
     def test_an_ied_with_no_sibling_is_refused_and_says_what_is_missing(self):
         """**Seven corpus IEDs subscribe to GOOSE and hold no supervision

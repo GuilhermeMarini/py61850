@@ -51,13 +51,24 @@ addresses -- and an `Address` holding `P` elements typed `MAC-Address`,
 `APPID`, `VLAN-ID` and `VLAN-PRIORITY`. A `GSE` carries `MinTime` and
 `MaxTime` after it; an `SMV` has nowhere to put them.
 
-**`Address` is optional.** `tControlBlock` declares it ``minOccurs="0"``, so
-an `SMV` naming its control block and carrying no address at all is valid
-SCL. That is what :func:`create_smv` writes when the caller supplies no
-address data, and it is the shape that matters: allocating a MAC and an APPID
-is A17's `macAddressGenerator` and `appIdGenerator`, and a `create` that
-invented them now and changed them at A17 would be worse than one that leaves
-the element ready for them. Same argument as A10's required `name` (Q27).
+**`Address` is optional in the schema and is written anyway.**
+`tControlBlock` declares it ``minOccurs="0"``, so an `SMV` naming only its
+control block is valid SCL -- and A11 wrote exactly that, deliberately,
+because allocating a MAC and an APPID was A17's and a `create` that invented
+them then and changed them later would be worse than one that waited.
+
+**A17b is that later, and it allocates.** :func:`create_gse` and
+:func:`create_smv` fill in a missing `mac` and `app_id` from
+:func:`~py61850.scl.next_mac_address` and :func:`~py61850.scl.next_app_id`.
+The two VLAN values have no generator and are still written only when given,
+so the line is precisely which of the four A17 ships an allocator for.
+
+**The reference does not document this either way** -- `CreateGSEOptions.mac`
+says only *"MAC-Address within `P` element"* -- so the decision is ours, and
+it is the opposite of the one :func:`~py61850.scl.insert_ied` takes about a
+device name. A multicast address and an APPID are station-scoped bookkeeping
+no engineer chooses by hand; a device name is on the relay and on the panel
+door. Q27's "ask rather than invent" holds for the second and not the first.
 
 **The `P` order is the reference's option order**, because nothing else fixes
 it. `tAddress` is ``<xs:sequence>`` over a single repeated `P`, so the schema
@@ -192,8 +203,10 @@ exists keeps whatever attributes it has: a change sets the text and nothing
 else.
 
 **A `GSE` created with neither time carries neither element.** Both are
-optional, it is the same argument the optional `Address` rests on, and
-defaults are A17's. It is the one shape here the corpus never contains.
+optional and **neither has a generator**, which is now the whole of the
+argument: A17b allocates exactly what A17 ships an allocator for, and a
+retransmission bound is a timing decision rather than a free value to pick.
+All 146 corpus GSEs write both.
 """
 
 from __future__ import annotations
@@ -202,6 +215,7 @@ from typing import List, Optional
 from xml.etree import ElementTree as ET
 
 from .document import strip_ns
+from .generator import next_app_id, next_mac_address
 from .edit import EditRejected, Insert, SetAttributes, SetTextContent
 from .extref import _qualify, _same
 from .ordering import reference_for
@@ -347,9 +361,36 @@ def _reject_duplicate(connected_ap, tag, ld_inst, cb_name) -> None:
 
 # -- creating ---------------------------------------------------------------
 
+def _allocated_address(doc, service_type, mac, app_id, taken=()):
+    """``mac`` and ``app_id``, each allocated when the caller gave none.
+
+    **This is the half of A17b the reference does not document.**
+    `CreateGSEOptions.mac` says only *"MAC-Address within `P` element"*;
+    whether `createGSE` calls its generator when the option is missing is in a
+    function body this project does not read. So the decision is ours: a `GSE`
+    or `SMV` with no `Address` is an incomplete publisher, and unlike a device
+    name -- which is on the relay and on the panel door, and which
+    `insert_ied` still refuses to invent -- a multicast address and an APPID
+    are station-scoped bookkeeping that no engineer chooses by hand.
+
+    ``taken`` is :mod:`py61850.scl.generator`'s batch record, threaded through
+    so two `GSE` created in one compound edit cannot be handed the same
+    address: the document does not yet hold the first when the second is
+    computed. Q33 §9 from the caller's side.
+
+    An explicit value is never second-guessed, including one already in use --
+    :func:`change_gse_or_smv_address` is where a clash is the caller's to see.
+    """
+    if mac is None:
+        mac = next_mac_address(doc, service_type, taken)
+    if app_id is None:
+        app_id = next_app_id(doc, service_type, taken)
+    return mac, app_id
+
+
 def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
                vlan_id=None, vlan_priority=None, min_time=None, max_time=None,
-               inst_type=None) -> List:
+               inst_type=None, taken=()) -> List:
     """The edit that adds a `GSE` addressing one `GSEControl`.
 
     The `SMV` of :func:`create_smv` with two more children. ``connected_ap``
@@ -365,8 +406,11 @@ def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
     the module docstring argues for. **Neither is written when it is not
     given**, and a `GSE` carrying no times at all is valid SCL.
 
-    The four address values are each optional, and a `GSE` with none of them
-    carries no `Address` -- the shape that waits for A17's generators.
+    **`mac` and `app_id` are allocated when not given**, from the GOOSE
+    prefix and band -- A17b, and the module docstring argues it. `vlan_id` and
+    `vlan_priority` have no generator and are written only when given.
+    ``taken`` is :mod:`py61850.scl.generator`'s batch record, so two `GSE`
+    created in one compound edit cannot be handed the same address.
     ``inst_type`` is the module docstring's three-valued ``xsi:type`` switch.
 
     Returns a list holding one :class:`~py61850.scl.Insert`, placed by A7's
@@ -380,6 +424,8 @@ def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
     _reject_bad_parent(connected_ap, "GSE")
     _reject_bad_key("GSE", ld_inst, cb_name)
     _reject_duplicate(connected_ap, "GSE", ld_inst, cb_name)
+
+    mac, app_id = _allocated_address(doc, "GSE", mac, app_id, taken)
 
     node = ET.Element(_qualify(doc, "GSE"))
     node.set("ldInst", ld_inst)
@@ -395,7 +441,8 @@ def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
 
 
 def create_smv(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
-               vlan_id=None, vlan_priority=None, inst_type=None) -> List:
+               vlan_id=None, vlan_priority=None, inst_type=None,
+               taken=()) -> List:
     """The edit that adds an `SMV` addressing one `SampledValueControl`.
 
     ``connected_ap`` is the `ConnectedAP` of the IED that publishes the
@@ -404,9 +451,11 @@ def create_smv(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
     and the pair :func:`~py61850.scl.control_block_gse_or_smv` looks one up
     with.
 
-    The four address values are each optional, and an `SMV` with none of them
-    carries no `Address` at all -- valid SCL, and the shape that waits for
-    A17's generators. The module docstring argues both that and the `P` order.
+    **`mac` and `app_id` are allocated when not given**, from the
+    sampled-value prefix and band rather than the GOOSE ones -- A17b, and the
+    module docstring argues it. `vlan_id` and `vlan_priority` have no
+    generator and are written only when given, and ``taken`` is the batch
+    record. The module docstring argues the `P` order.
     ``inst_type`` is its three-valued ``xsi:type`` switch, and its default
     writes none, which is the shape this function shipped with in A12.
 
@@ -425,6 +474,8 @@ def create_smv(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
     _reject_bad_parent(connected_ap, "SMV")
     _reject_bad_key("SMV", ld_inst, cb_name)
     _reject_duplicate(connected_ap, "SMV", ld_inst, cb_name)
+
+    mac, app_id = _allocated_address(doc, "SMV", mac, app_id, taken)
 
     node = ET.Element(_qualify(doc, "SMV"))
     node.set("ldInst", ld_inst)

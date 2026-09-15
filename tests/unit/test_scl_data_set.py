@@ -324,14 +324,59 @@ class TestCreateDataSet(_Base):
         doc.apply_edit(create_data_set(doc, self.ln0(doc), "TWO", desc="trips"))
         self.assertEqual(_named(doc, "DataSet", "TWO").get("desc"), "trips")
 
-    def test_a_name_is_required(self):
-        """The reference's is optional, and filling one in means allocating a
-        unique name -- which is A17's, and whose policy its own row in the
-        plan calls a likely divergence."""
+    def test_no_name_allocates_one_and_an_empty_name_still_raises(self):
+        """**A17b flipped half of this.** A10 refused both, because
+        allocating was A17's; A17 shipped the allocator, so ``None`` is now a
+        request and only ``""`` is still an error -- a caller whose own name
+        computation returned nothing."""
         doc = self.doc()
+        before = [d.get("name") for d in iter_local(doc.root, "DataSet")]
+        doc.apply_edit(create_data_set(doc, self.ln0(doc)))
+        self.assertEqual(
+            before + ["newDataSet"],
+            [d.get("name") for d in iter_local(doc.root, "DataSet")])
+
         with self.assertRaises(EditRejected) as caught:
             create_data_set(doc, self.ln0(doc), "")
-        self.assertIn("A17", str(caught.exception))
+        self.assertIn("empty name", str(caught.exception))
+        self.assertNotIn("A17", str(caught.exception))
+
+    def test_two_creates_in_one_compound_edit_need_the_batch_record(self):
+        """**A defect A17b found in its own wiring, by counting the result.**
+        Inside one compound edit the document does not yet hold the first
+        name when the second is computed, so both come back ``newDataSet`` --
+        and `DataSetKeyLN0` is an `xs:key`, so that document is invalid. It is
+        Q33 §9 for the fourth time and the reason `taken` reaches this far.
+        """
+        doc = self.doc()
+        ln0 = self.ln0(doc)
+        before = [d.get("name") for d in iter_local(doc.root, "DataSet")]
+
+        collided = (create_data_set(doc, ln0) + create_data_set(doc, ln0))
+        undo = doc.apply_edit(collided)
+        names = [d.get("name") for d in iter_local(doc.root, "DataSet")]
+        self.assertEqual(["newDataSet", "newDataSet"], names[len(before):])
+        doc.apply_edit(undo)
+
+        claimed = set()
+        edits = []
+        for _ in range(3):
+            made = create_data_set(doc, ln0, taken=claimed)
+            claimed.add(made[0].node.get("name"))
+            edits += made
+        doc.apply_edit(edits)
+        self.assertEqual(
+            before + ["newDataSet", "newDataSet_1", "newDataSet_2"],
+            [d.get("name") for d in iter_local(doc.root, "DataSet")])
+
+    def test_a_second_allocation_takes_the_next_suffix(self):
+        doc = self.doc()
+        before = [d.get("name") for d in iter_local(doc.root, "DataSet")]
+        doc.apply_edit(create_data_set(doc, self.ln0(doc)))
+        doc.apply_edit(create_data_set(doc, self.ln0(doc)))
+        self.assertEqual(
+            before + ["newDataSet", "newDataSet_1"],
+            [d.get("name") for d in iter_local(doc.root, "DataSet")])
 
     def test_a_name_already_in_the_logical_node_is_refused(self):
         """`DataSetKeyLN0` is an `xs:key`, so two datasets of one name in one

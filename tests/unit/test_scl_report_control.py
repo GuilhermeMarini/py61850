@@ -321,10 +321,17 @@ class TestCreateReportControl(_Base):
         doc.apply_edit(create_report_control(doc, node, "R9"))
         self.assertIs(doc.parent_of(_named(doc, "ReportControl", "R9")), node)
 
-    def test_a_missing_name_is_refused(self):
-        """A10's line, held: allocating one is A17's. See Q27."""
+    def test_no_name_allocates_the_references_documented_default(self):
+        """**A17b flipped half of this.** The prefix is the reference's own:
+        *"a unique name starting with `newReportControl_xx` is set"*. An empty
+        name still raises."""
         doc = self.doc()
-        with self.assertRaisesRegex(EditRejected, "A17"):
+        before = [r.get("name") for r in iter_local(doc.root, "ReportControl")]
+        doc.apply_edit(create_report_control(doc, self.ln0(doc)))
+        self.assertEqual(
+            before + ["newReportControl"],
+            [r.get("name") for r in iter_local(doc.root, "ReportControl")])
+        with self.assertRaisesRegex(EditRejected, "empty name"):
             create_report_control(doc, self.ln0(doc), "")
 
     def test_an_empty_conf_rev_is_refused(self):

@@ -24,6 +24,7 @@ import unittest
 from xml.etree import ElementTree as ET
 
 from py61850.scl import (
+    ALLOCATED_NAME_PREFIX,
     APP_ID_RANGES,
     LN_INST_ELEMENTS,
     LN_INST_RANGE,
@@ -274,8 +275,8 @@ class TestBatchRecord(_Base):
         self.assertEqual("0001", next_app_id(doc, "GSE", taken=["0000"]))
         parent = self.element('<LDevice inst="LD0"/>')
         self.assertEqual("2", next_ln_inst(parent, "LN", "CSWI", taken=[1]))
-        self.assertEqual("DataSet_1", unique_element_name(
-            parent, "DataSet", taken=["DataSet"]))
+        self.assertEqual("newDataSet_1", unique_element_name(
+            parent, "DataSet", taken=["newDataSet"]))
 
     def test_the_record_accepts_values_spelled_loosely(self):
         doc = self.doc(name="batch_d.scd")
@@ -362,49 +363,83 @@ class TestLnInst(_Base):
 # -- element names ----------------------------------------------------------
 
 class TestUniqueElementName(_Base):
+    """**A17b changed the stem and Q39 §0 is why.** A17 shipped
+    ``DataSet``/``DataSet_1``, taken from the corpus; the reference documents
+    ``new<Tag>_xx`` on the three functions that call its allocator, and A17
+    read the allocator's own one-line declaration instead of its callers'."""
+
     def ln0(self, *children):
         return self.element('<LN0 lnClass="LLN0" lnType="T">'
                             + "".join(children) + "</LN0>")
 
-    def test_the_stem_is_the_tag_when_nothing_carries_it(self):
-        # `siemens.scd` carries a DataSet named literally `DataSet`.
-        self.assertEqual("DataSet", unique_element_name(self.ln0(), "DataSet"))
+    def test_the_stem_carries_the_references_new_prefix(self):
+        self.assertEqual("newDataSet",
+                         unique_element_name(self.ln0(), "DataSet"))
+        self.assertEqual("new", ALLOCATED_NAME_PREFIX)
+
+    def test_a_name_equal_to_the_bare_tag_does_not_collide(self):
+        # `siemens.scd` really does carry a DataSet named `DataSet`. The
+        # prefix means an allocated name cannot land on it.
+        parent = self.ln0(fx.dataset("DataSet"))
+        self.assertEqual("newDataSet",
+                         unique_element_name(parent, "DataSet"))
 
     def test_the_suffix_starts_at_one(self):
-        parent = self.ln0(fx.dataset("DataSet"))
-        self.assertEqual("DataSet_1", unique_element_name(parent, "DataSet"))
+        parent = self.ln0(fx.dataset("newDataSet"))
+        self.assertEqual("newDataSet_1",
+                         unique_element_name(parent, "DataSet"))
 
-    def test_the_corpus_sequence_is_reproduced(self):
-        # `DataSet`, `DataSet_1`, `DataSet_2`, `DataSet_3` -- siemens.scd's own.
-        parent = self.ln0(fx.dataset("DataSet"), fx.dataset("DataSet_1"),
-                          fx.dataset("DataSet_2"))
-        self.assertEqual("DataSet_3", unique_element_name(parent, "DataSet"))
+    def test_the_corpus_suffix_sequence_is_reproduced(self):
+        # The SUFFIX is the corpus's, even though the prefix is not:
+        # siemens.scd writes DataSet, DataSet_1, DataSet_2, DataSet_3.
+        parent = self.ln0(fx.dataset("newDataSet"),
+                          fx.dataset("newDataSet_1"),
+                          fx.dataset("newDataSet_2"))
+        self.assertEqual("newDataSet_3",
+                         unique_element_name(parent, "DataSet"))
 
     def test_a_hole_in_the_suffixes_is_filled(self):
-        parent = self.ln0(fx.dataset("DataSet"), fx.dataset("DataSet_2"))
-        self.assertEqual("DataSet_1", unique_element_name(parent, "DataSet"))
+        parent = self.ln0(fx.dataset("newDataSet"),
+                          fx.dataset("newDataSet_2"))
+        self.assertEqual("newDataSet_1",
+                         unique_element_name(parent, "DataSet"))
 
     def test_another_tag_of_the_same_name_does_not_collide(self):
         # `uniqueDataSetInLN0` selects `./scl:DataSet` and
         # `uniqueReportControlInLN0` `./scl:ReportControl` -- separate keys,
         # so the two names may be equal. A16's containers are the other way.
-        parent = self.ln0(fx.report_control("DataSet"))
-        self.assertEqual("DataSet", unique_element_name(parent, "DataSet"))
+        parent = self.ln0(fx.report_control("newDataSet"))
+        self.assertEqual("newDataSet",
+                         unique_element_name(parent, "DataSet"))
 
     def test_it_works_for_every_tag_the_seven_modules_need(self):
         for tag in ("DataSet", "ReportControl", "GSEControl",
                     "SampledValueControl", "LogControl"):
-            self.assertEqual(tag, unique_element_name(self.ln0(), tag))
+            self.assertEqual(ALLOCATED_NAME_PREFIX + tag,
+                             unique_element_name(self.ln0(), tag))
 
     def test_only_direct_children_are_counted(self):
-        parent = self.ln0('<Private type="v">' + fx.dataset("DataSet")
+        parent = self.ln0('<Private type="v">' + fx.dataset("newDataSet")
                           + "</Private>")
-        self.assertEqual("DataSet", unique_element_name(parent, "DataSet"))
+        self.assertEqual("newDataSet",
+                         unique_element_name(parent, "DataSet"))
 
     def test_it_cannot_be_exhausted(self):
-        parent = self.ln0(fx.dataset("DataSet"),
-                          *[fx.dataset(f"DataSet_{n}") for n in range(1, 60)])
-        self.assertEqual("DataSet_60", unique_element_name(parent, "DataSet"))
+        parent = self.ln0(fx.dataset("newDataSet"),
+                          *[fx.dataset(f"newDataSet_{n}")
+                            for n in range(1, 60)])
+        self.assertEqual("newDataSet_60",
+                         unique_element_name(parent, "DataSet"))
+
+    def test_the_type_id_allocator_keeps_the_suffix_and_not_the_prefix(self):
+        # `_fresh_id` starts from the source's own id, which is already the
+        # engineer's and already meaningful; prefixing `SEL_LLN0_V01` to
+        # `newSEL_LLN0_V01` would lose the only thing making the imported type
+        # recognisable. The two allocators share the suffix rule and not the
+        # stem rule, deliberately.
+        from py61850.scl.data_types import _fresh_id
+        self.assertEqual("SEL_LLN0_V01_1",
+                         _fresh_id("LNodeType", "SEL_LLN0_V01", set()))
 
     def test_a_non_element_parent_says_so(self):
         with self.assertRaises(EditRejected) as caught:
@@ -570,10 +605,12 @@ class TestCorpus(unittest.TestCase):
 # -- nothing here is an edit ------------------------------------------------
 
 class TestNothingIsApplied(_Base):
-    """Seven modules defer allocation to this one and none of them is rewired
-    yet -- that is A17b, split off under `RULES` §5 because three of the seven
-    currently RAISE where they will allocate. This class is the guard that the
-    split held."""
+    """The allocators themselves still build no edit, and the seven modules
+    that defer to them are wired as of A17b.
+
+    A17 split the wiring off under `RULES` §5 because three of the seven
+    RAISED where they would allocate; this class was the guard that the split
+    held, and it now records that it closed."""
 
     def test_no_allocator_changes_the_document(self):
         doc = self.doc(station(gse_macs=("01-0C-CD-01-00-00",),
@@ -585,19 +622,29 @@ class TestNothingIsApplied(_Base):
         unique_element_name(doc.root, "DataSet")
         self.assertEqual(before, doc.to_bytes())
 
-    def test_the_three_modules_that_will_be_rewired_still_refuse(self):
-        # A17b flips these. Until it does, the refusal is the behaviour and a
-        # test asserts it here as well as in its own module, so the split is
-        # visible from this side too.
+    def test_the_three_rewired_modules_now_allocate(self):
+        # **A17b flipped these**, and the guard moves with them rather than
+        # being deleted: what used to assert a refusal naming A17 now asserts
+        # that the allocator is reached and that the reference's prefix is
+        # what comes out.
         from py61850.scl import (create_data_set, create_report_control,
                                  create_sampled_value_control)
-        doc = self.doc(name="still_refuse.scd")
-        ln0 = ET.fromstring('<LN0 lnClass="LLN0" lnType="T"/>')
-        for function in (create_data_set, create_report_control,
-                         create_sampled_value_control):
-            with self.assertRaises(EditRejected) as caught:
+        doc = self.doc(name="now_allocate.scd")
+        for function, tag in ((create_data_set, "DataSet"),
+                              (create_report_control, "ReportControl"),
+                              (create_sampled_value_control,
+                               "SampledValueControl")):
+            ln0 = ET.fromstring('<LN0 lnClass="LLN0" lnType="T"/>')
+            edits = function(doc, ln0)
+            created = [e for e in edits
+                       if getattr(e, "node", None) is not None
+                       and strip_ns(e.node.tag) == tag]
+            self.assertEqual(1, len(created), tag)
+            self.assertEqual(ALLOCATED_NAME_PREFIX + tag,
+                             created[0].node.get("name"))
+            # An empty name is still a caller's bug and still raises.
+            with self.assertRaises(EditRejected):
                 function(doc, ln0, "")
-            self.assertIn("A17", str(caught.exception))
 
 
 if __name__ == "__main__":
