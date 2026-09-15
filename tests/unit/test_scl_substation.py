@@ -48,15 +48,19 @@ from xml.etree import ElementTree as ET
 from py61850.scl import (
     CONTAINER_NAME_ATTRIBUTES,
     PROCESS_SECTIONS,
+    SPECIFICATION_ELEMENTS,
+    SPECIFICATION_NS,
     TERMINAL_ELEMENTS,
     EditRejected,
     Insert,
     Remove,
     SclDocument,
     SetAttributes,
+    prune_lnode_specification,
     remove_process_element,
     strip_ns,
     update_bay,
+    update_lnode_type,
     update_substation,
     update_voltage_level,
 )
@@ -852,3 +856,500 @@ class TestAttributeOrderIsNotDisturbed(_Base):
             self.minimal("connectivityNode", "bayName"), "order_b.ssd")
         self.assertIn('<Terminal connectivityNode="S1/V1/Q01/N1" '
                       'bayName="Q01" />', out)
+
+
+# -- IEC TR 61850-6-100: pruning an LNode's specification --------------------
+#
+# A SECOND IEC namespace, and the same problem the rest of this module has:
+# no corpus material at all. `DOS`, `SDS` and `DAS` are already three of
+# `SECTION_NAMES`' twenty-three, so `TestNoCorpusMaterial` above already
+# asserts their absence from all three exports and needs no extending.
+#
+# What the fixtures are shaped by is again IEC's own `Eng POC.ssd`, and what
+# it shows is reproduced from scratch by `specified()` below:
+#
+#   - every DOS inside `LNode/Private[@type="eIEC61850-6-100"]`, 106 of 106;
+#   - `SDS` naming a `DA` with bType="Struct", never an `SDO` -- all 17;
+#   - `DAS name="d"` against DOTypes that declare only stVal/q/t, which is 72
+#     of that file's 73 misses and the reason a strict prune removes a fifth
+#     of it.
+
+def specified(ln_type="T_PTOC", second_ln_type="T_PTOC", spec=None,
+              declared_dos=(("Str", "T_ACD"), ("StrVal", "T_ASG"),
+                            ("Beh", "T_ENS")),
+              acd_das=({"name": "general", "bType": "BOOLEAN", "fc": "ST"},
+                       {"name": "q", "bType": "Quality", "fc": "ST"}),
+              asg_das=({"name": "setMag", "bType": "Struct", "fc": "SP",
+                        "type": "T_AnalogueValue"},),
+              analogue_bdas=({"name": "f", "bType": "FLOAT32"},
+                             {"name": "i", "bType": "INT32"}),
+              acd_sdos=(("phsA", "T_ACD_phs"),),
+              templates=None, ns=True):
+    """One document carrying a specified `LNode`, and the pool behind it.
+
+    The shape is IEC's, reproduced rather than copied:
+
+    - ``T_PTOC`` declares three DOs. ``Str`` is an ACD-shaped `DOType` with a
+      leaf `DA` (``general``), a `Quality` `DA` and **an `SDO`** (``phsA``),
+      so both kinds of structured child are reachable from one place.
+    - ``StrVal`` is an ASG-shaped `DOType` whose only `DA` is
+      ``bType="Struct"`` -- the exact shape all 17 of `Eng POC.ssd`'s `SDS`
+      resolve to.
+    - **None of the three `DOType` declares ``d``**, as the trimmed
+      `ELIA_SPS_basic_V001` does not, which is what makes the file's
+      commonest miss reproducible here.
+
+    ``spec`` replaces the specification body wholesale; the default is one
+    that resolves completely, so a test that changes nothing gets ``[]``.
+    """
+    if spec is None:
+        spec = (fx.dos("Str", body=(fx.das("general")
+                                    + fx.sds("phsA", body=fx.das("general"))))
+                + fx.dos("StrVal",
+                         body=fx.sds("setMag", body=fx.das("f")))
+                + fx.dos("Beh", body=fx.das("stVal")))
+
+    if templates is None:
+        templates = fx.templates(
+            fx.lnode_type("T_PTOC", ln_class="PTOC", dos=declared_dos),
+            fx.lnode_type("T_OTHER", ln_class="PTRC",
+                          dos=(("Beh", "T_ENS"),)),
+            fx.do_type("T_ACD", cdc="ACD", das=acd_das, sdos=acd_sdos),
+            fx.do_type("T_ACD_phs", cdc="ACD", das=acd_das),
+            fx.do_type("T_ASG", cdc="ASG", das=asg_das),
+            fx.do_type("T_ENS", cdc="ENS",
+                       das=({"name": "stVal", "bType": "Enum", "fc": "ST",
+                             "type": "T_Beh"},)),
+            fx.da_type("T_AnalogueValue", bdas=analogue_bdas),
+            fx.enum_type("T_Beh", values=((1, "on"), (2, "blocked"))),
+        )
+
+    def node(ln_inst, type_, body):
+        return ('<LNode lnClass="PTOC" lnInst="%s" lnType="%s">%s</LNode>'
+                % (ln_inst, type_, body))
+
+    bay = fx.bay("B0", body=fx.substation_function("F1", body=(
+        node("1", ln_type, fx.spec_private(spec))
+        + node("2", second_ln_type, fx.spec_private(spec)))))
+    section = fx.substation("S1", body=fx.voltage_level("V1", body=bay))
+    return fx.scl(fx.header(), section, templates, spec_ns=True, ns=ns)
+
+
+class _Spec(_Base):
+    """Every test here reads the document back after applying, never the edit
+    list it applied -- `_Base.applied` and the module docstring's rule."""
+
+    def specified_doc(self, name=None, **kwargs):
+        return self.doc(specified(**kwargs),
+                        name=name or f"spec_{id(kwargs)}.ssd")
+
+    def spec_names(self, doc):
+        """``[(local name, @name), ...]`` for every 6-100 element left, in
+        document order -- the result, counted."""
+        return [(strip_ns(el.tag), el.get("name"))
+                for el in doc.root.iter()
+                if isinstance(el.tag, str)
+                and el.tag.startswith(SPECIFICATION_NS)]
+
+    def pruned(self, doc, id_="T_PTOC", **kwargs):
+        edits = prune_lnode_specification(doc, id_, **kwargs)
+        self.applied(doc, edits)
+        return edits
+
+
+class TestSpecificationShape(_Spec):
+    def test_a_document_whose_specification_resolves_is_left_alone(self):
+        doc = self.specified_doc("resolves.ssd")
+        before = self.spec_names(doc)
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+        self.assertEqual(before, self.spec_names(doc))
+
+    def test_an_unknown_type_is_refused_rather_than_read_as_empty(self):
+        # The tempting failure: no LNodeType, so nothing is declared, so
+        # everything is missing and the whole specification goes.
+        doc = self.specified_doc("unknown.ssd")
+        with self.assertRaises(EditRejected) as caught:
+            prune_lnode_specification(doc, "T_ABSENT")
+        self.assertIn("T_ABSENT", str(caught.exception))
+        self.assertIn("target", str(caught.exception))
+
+    def test_an_unknown_type_in_the_source_names_the_source(self):
+        doc = self.specified_doc("src_unknown.ssd")
+        other = self.doc(specified(), name="src_unknown_2.ssd")
+        with self.assertRaises(EditRejected) as caught:
+            prune_lnode_specification(doc, "T_ABSENT", source=other)
+        self.assertIn("source", str(caught.exception))
+
+    def test_an_element_where_a_document_belongs_says_so(self):
+        doc = self.specified_doc("not_a_doc.ssd")
+        with self.assertRaises(EditRejected) as caught:
+            prune_lnode_specification(doc, "T_PTOC", source=doc.root)
+        self.assertIn("SclDocument", str(caught.exception))
+
+    def test_a_document_with_no_templates_at_all_is_refused(self):
+        doc = self.doc(specified(templates=""), name="no_pool.ssd")
+        with self.assertRaises(EditRejected):
+            prune_lnode_specification(doc, "T_PTOC")
+
+    def test_the_namespace_constant_is_the_trs_and_both_editions_agree(self):
+        # `targetNamespace` is identical in IEC TR 61850-6-100's 2019B9 and
+        # 2019C1, which is what makes keying on it edition-stable.
+        self.assertEqual("{http://www.iec.ch/61850/2019/SCL/6-100}",
+                         SPECIFICATION_NS)
+        self.assertEqual(("DOS", "SDS", "DAS"), SPECIFICATION_ELEMENTS)
+
+
+class TestSpecificationResolution(_Spec):
+    """Every level of the walk, and the two spellings that do not mean what
+    they say."""
+
+    def test_a_dos_naming_a_declared_do_survives(self):
+        doc = self.specified_doc("dos_ok.ssd")
+        self.pruned(doc)
+        self.assertIn(("DOS", "Str"), self.spec_names(doc))
+
+    def test_an_sds_resolving_to_an_sdo_survives(self):
+        # `phsA` is an SDO of T_ACD. The reachable-through-an-SDO branch.
+        doc = self.specified_doc("sds_sdo.ssd")
+        self.pruned(doc)
+        self.assertIn(("SDS", "phsA"), self.spec_names(doc))
+
+    def test_an_sds_resolving_to_a_struct_da_survives(self):
+        # `setMag` is a DA with bType="Struct" -- what all 17 of
+        # `Eng POC.ssd`'s SDS actually resolve to, against an annotation that
+        # calls SDS a sub-Data Object.
+        doc = self.specified_doc("sds_struct.ssd")
+        self.pruned(doc)
+        self.assertIn(("SDS", "setMag"), self.spec_names(doc))
+
+    def test_a_das_under_a_struct_sds_resolves_through_the_datype(self):
+        doc = self.specified_doc("das_bda.ssd")
+        self.pruned(doc)
+        self.assertIn(("DAS", "f"), self.spec_names(doc))
+
+    def test_a_das_naming_a_bda_the_datype_lacks_is_removed(self):
+        doc = self.doc(specified(spec=fx.dos(
+            "StrVal", body=fx.sds("setMag", body=fx.das("nope")))),
+            name="bda_gone.ssd")
+        self.pruned(doc)
+        self.assertEqual([("DOS", "StrVal"), ("SDS", "setMag")] * 2,
+                         self.spec_names(doc))
+
+    def test_the_element_spelling_is_ignored_and_the_name_decides(self):
+        # A `DAS` on a Struct DA and an `SDS` on a leaf DA: both resolve,
+        # because `uniqueDAorSDOInDOType` makes the NAME the key and the TR
+        # gives the spelling no meaning the material supports.
+        doc = self.doc(specified(spec=(
+            fx.dos("StrVal", body=fx.das("setMag"))
+            + fx.dos("Str", body=fx.sds("general")))), name="spelling.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_a_nested_sds_walks_further_down(self):
+        doc = self.doc(specified(spec=fx.dos("Str", body=fx.sds(
+            "phsA", body=fx.sds("q", body=fx.das("nope"))))),
+            name="nested.ssd")
+        # `q` is a Quality DA. It resolves, so the `SDS` over it stays -- but
+        # it declares no members, so the `DAS` under it is missing at a depth
+        # a single lookup would never have reached.
+        self.pruned(doc)
+        self.assertEqual([("DOS", "Str"), ("SDS", "phsA"), ("SDS", "q")] * 2,
+                         self.spec_names(doc))
+
+
+class TestSpecificationMissing(_Spec):
+    def test_a_dos_the_type_does_not_declare_is_removed(self):
+        doc = self.doc(specified(spec=(fx.dos("Str") + fx.dos("TmAChr"))),
+                       name="dos_gone.ssd")
+        self.pruned(doc)
+        self.assertEqual([("DOS", "Str")] * 2, self.spec_names(doc))
+
+    def test_a_das_the_dotype_does_not_declare_is_removed(self):
+        # `d` -- the CDC description attribute -- against a trimmed DOType.
+        # 72 of `Eng POC.ssd`'s 73 misses are exactly this.
+        doc = self.doc(specified(spec=fx.dos(
+            "Str", body=fx.das("general") + fx.das("d"))), name="d_gone.ssd")
+        self.pruned(doc)
+        self.assertEqual([("DOS", "Str"), ("DAS", "general")] * 2,
+                         self.spec_names(doc))
+
+    def test_only_the_outermost_missing_element_is_removed(self):
+        # A missing DOS carrying four descendants is ONE Remove, not five:
+        # the Remove takes the subtree, and a second Remove of a node already
+        # gone would apply against a document that no longer holds it.
+        doc = self.doc(specified(spec=fx.dos("TmAChr", body=(
+            fx.das("numPts") + fx.sds("crvPts", body=fx.das("xVal"))
+            + fx.das("maxPts")))), name="outermost.ssd")
+        edits = self.pruned(doc)
+        self.assertEqual(2, len(edits))          # one per LNode
+        self.assertTrue(all(isinstance(edit, Remove) for edit in edits))
+        self.assertEqual([], self.spec_names(doc))
+
+    def test_every_removal_is_a_remove_and_nothing_else(self):
+        # The reference returns `Remove[]`, not `EditV2[]`: a DOS the type
+        # declares and the instance lacks is never invented. `Beh` and
+        # `StrVal` are declared and unspecified here, and stay that way.
+        doc = self.doc(specified(spec=fx.dos("Str", body=fx.das("d"))),
+                       name="removes_only.ssd")
+        edits = self.pruned(doc)
+        self.assertEqual({Remove}, {type(edit) for edit in edits})
+        self.assertEqual([("DOS", "Str")] * 2, self.spec_names(doc))
+
+    def test_both_lnodes_of_the_type_are_pruned(self):
+        doc = self.doc(specified(spec=fx.dos("TmAChr")), name="both.ssd")
+        self.assertEqual(2, len(self.pruned(doc)))
+
+    def test_an_lnode_of_another_type_is_untouched(self):
+        doc = self.doc(specified(second_ln_type="T_OTHER",
+                                 spec=fx.dos("TmAChr")), name="other.ssd")
+        self.pruned(doc)
+        self.assertEqual([("DOS", "TmAChr")], self.spec_names(doc))
+
+
+class TestSpecificationLeftAlone(_Spec):
+    """A type that does not resolve ends the walk on that branch. Deleting a
+    specification because the pool was trimmed is the opposite of the edit
+    asked for -- `TemplatePool` tolerates a dangling reference on READ
+    deliberately, and the renames above leave an unresolvable
+    `@connectivityNode` alone for the same reason."""
+
+    def test_an_lnode_with_no_lntype_is_untouched(self):
+        # One of the 90-30 example's sixteen has none.
+        text = specified(spec=fx.dos("TmAChr")).replace(
+            ' lnType="T_PTOC"', "", 1)
+        doc = self.doc(text, name="no_lntype.ssd")
+        self.pruned(doc)
+        self.assertEqual([("DOS", "TmAChr")], self.spec_names(doc))
+
+    def test_a_dos_whose_dotype_is_absent_keeps_its_whole_subtree(self):
+        # `Str` IS declared; `T_ACD` is not in the pool. The DOS stays,
+        # because the type declares the object, and nothing under it can be
+        # judged.
+        doc = self.doc(specified(
+            declared_dos=(("Str", "T_MISSING"),),
+            spec=fx.dos("Str", body=fx.das("general") + fx.das("nope"))),
+            name="dotype_gone.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_a_struct_da_whose_datype_is_absent_keeps_its_children(self):
+        doc = self.doc(specified(
+            asg_das=({"name": "setMag", "bType": "Struct", "fc": "SP",
+                      "type": "T_MISSING"},),
+            spec=fx.dos("StrVal", body=fx.sds("setMag", body=fx.das("nope")))),
+            name="datype_gone.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_an_sdo_whose_dotype_is_absent_keeps_its_children(self):
+        doc = self.doc(specified(
+            acd_sdos=(("phsA", "T_MISSING"),),
+            spec=fx.dos("Str", body=fx.sds("phsA", body=fx.das("nope")))),
+            name="sdo_gone.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_ix_is_not_checked(self):
+        # `ix` is an array index and the TR's key is (@name, @ix); whether an
+        # index is within a bound is a different question, and 0 DA or BDA in
+        # either example file carries `@count` to bound it with.
+        doc = self.doc(specified(spec=fx.dos("Str", body=(
+            fx.das("general", ix="0") + fx.das("general", ix="1")))),
+            name="ix.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_the_other_children_of_a_dos_are_not_touched(self):
+        # A DOS may also hold SubscriberLNode, ControllingLNode, ProcessEcho,
+        # LogParametersRef and Labels. None names a member of a data type.
+        other = ('<eIEC61850-6-100:ControllingLNode outputName="OUT1"/>'
+                 '<eIEC61850-6-100:ProcessEcho/>')
+        doc = self.doc(specified(spec=fx.dos(
+            "Str", body=other + fx.das("d"))), name="siblings.ssd")
+        self.pruned(doc)
+        self.assertEqual(
+            [("DOS", "Str"), ("ControllingLNode", None), ("ProcessEcho", None)]
+            * 2, self.spec_names(doc))
+
+    def test_a_dos_with_no_name_at_all_is_removed(self):
+        # `@name` is use="required"; one absent cannot resolve and cannot be
+        # guessed at.
+        text = specified(spec=fx.dos("Str")).replace('DOS name="Str"', "DOS")
+        doc = self.doc(text, name="unnamed.ssd")
+        self.pruned(doc)
+        self.assertEqual([], self.spec_names(doc))
+
+
+class TestSpecificationAttachment(_Spec):
+    """`tBaseElement` opens with an `xs:any namespace="##other"` before `Text`
+    and `Private`, identically in 2007B4 and 2007C5 -- so a `DOS` directly
+    under an `LNode` is schema-valid, and is what the TR's own annotation asks
+    for. IEC's files use the `Private` form on 106 of 106 and this module
+    reads both, keyed on the namespace rather than on a `Private@type` string
+    that appears nowhere in the 6-100 schema."""
+
+    def bare(self, spec):
+        """The same document with the `Private` wrapper taken away."""
+        return specified(spec=spec).replace(
+            f'<Private type="{fx.SPEC_PREFIX}">', "").replace(
+            "</Private>", "")
+
+    def test_a_dos_directly_under_the_lnode_is_found(self):
+        doc = self.doc(self.bare(fx.dos("TmAChr")), name="bare_gone.ssd")
+        self.pruned(doc)
+        self.assertEqual([], self.spec_names(doc))
+
+    def test_a_dos_directly_under_the_lnode_is_also_kept_when_declared(self):
+        doc = self.doc(self.bare(fx.dos("Str", body=fx.das("general"))),
+                       name="bare_ok.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_a_private_of_another_type_is_read_just_the_same(self):
+        # The `@type` is the files' convention, not the schema's, so the
+        # library must not depend on it.
+        text = specified(spec=fx.dos("TmAChr")).replace(
+            f'type="{fx.SPEC_PREFIX}"', 'type="SomethingElse"')
+        doc = self.doc(text, name="other_private.ssd")
+        self.pruned(doc)
+        self.assertEqual([], self.spec_names(doc))
+
+    def test_a_dos_nested_deeper_inside_a_private_is_left_alone(self):
+        # One level into a Private and no further: a DOS below that belongs
+        # to whatever structure put it there.
+        deeper = (f'<{fx.SPEC_PREFIX}:BayType>'
+                  + fx.dos("TmAChr") + f'</{fx.SPEC_PREFIX}:BayType>')
+        doc = self.doc(specified(spec=deeper), name="deep.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+
+class TestSpecificationNamespaceGuard(_Spec):
+    """An element whose LOCAL name is `DOS` and whose namespace is not the
+    TR's is a different element. A8, A10, A12 and A13 each met a vendor
+    element wearing a standard local name."""
+
+    def test_a_dos_in_the_scl_namespace_is_not_a_specification(self):
+        doc = self.doc(specified(spec='<DOS name="TmAChr"/>'),
+                       name="scl_dos.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_a_dos_in_a_vendor_namespace_is_not_a_specification(self):
+        spec = ('<v:DOS xmlns:v="http://example.invalid/vendor" '
+                'name="TmAChr"/>')
+        doc = self.doc(specified(spec=spec), name="vendor_dos.ssd")
+        self.assertEqual([], prune_lnode_specification(doc, "T_PTOC"))
+
+    def test_a_document_declaring_no_default_namespace_still_works(self):
+        # A hand-made SCD declaring none is real; the 6-100 prefix is
+        # declared either way, and the LNode sweep is namespace-exact.
+        doc = self.doc(specified(spec=fx.dos("TmAChr"), ns=False),
+                       name="no_default_ns.ssd")
+        self.pruned(doc)
+        self.assertEqual([], self.spec_names(doc))
+
+
+class TestSpecificationApplied(_Spec):
+    """Applying it, and reading the bytes back. Five phases running have found
+    their defect this way and no other -- Q33 §9, Q34 §4 and §5, Q35 §7 and
+    Q36 §7."""
+
+    def test_the_undo_restores_the_file_byte_for_byte(self):
+        text = specified(spec=fx.dos("Str", body=fx.das("d")) +
+                         fx.dos("TmAChr"))
+        doc = self.doc(text, name="undo.ssd")
+        before = doc.to_bytes()
+        undo = self.applied(doc, prune_lnode_specification(doc, "T_PTOC"))
+        self.assertNotEqual(before, doc.to_bytes())
+        doc.apply_edit(undo)
+        self.assertEqual(before, doc.to_bytes())
+
+    def test_the_prefix_and_the_untouched_elements_survive(self):
+        doc = self.doc(specified(spec=fx.dos("Str", body=fx.das("d"))),
+                       name="prefix.ssd")
+        self.applied(doc, prune_lnode_specification(doc, "T_PTOC"))
+        out = doc.to_bytes().decode()
+        self.assertIn('xmlns:eIEC61850-6-100=', out)
+        self.assertIn('<eIEC61850-6-100:DOS name="Str"', out)
+        self.assertNotIn('DAS', out)
+
+    def test_nothing_else_in_the_document_moves(self):
+        doc = self.doc(specified(spec=fx.dos("TmAChr")), name="quiet.ssd")
+        paths = self.paths(doc)
+        terminals = self.terminals(doc)
+        self.applied(doc, prune_lnode_specification(doc, "T_PTOC"))
+        self.assertEqual(paths, self.paths(doc))
+        self.assertEqual(terminals, self.terminals(doc))
+        self.assertEqual(8, len(self.all(doc, "DOType"))
+                         + len(self.all(doc, "LNodeType"))
+                         + len(self.all(doc, "DAType"))
+                         + len(self.all(doc, "EnumType")))
+
+    def test_the_pool_is_read_and_never_changed(self):
+        # The direction is the distinction: this asks DataTypeTemplates what
+        # a type declares and edits the LNode. `remove_process_element` does
+        # not cascade into that section and neither does this.
+        doc = self.doc(specified(spec=fx.dos("TmAChr")), name="pool.ssd")
+        before = ET.tostring(self.find(doc, "DataTypeTemplates"))
+        self.applied(doc, prune_lnode_specification(doc, "T_PTOC"))
+        self.assertEqual(before,
+                         ET.tostring(self.find(doc, "DataTypeTemplates")))
+
+    def test_the_lnode_itself_keeps_every_attribute(self):
+        doc = self.doc(specified(spec=fx.dos("TmAChr")), name="attrs.ssd")
+        self.applied(doc, prune_lnode_specification(doc, "T_PTOC"))
+        lnode = self.all(doc, "LNode")[0]
+        self.assertEqual({"lnClass": "PTOC", "lnInst": "1",
+                          "lnType": "T_PTOC"}, dict(lnode.attrib))
+
+
+class TestSpecificationAgainstASource(_Spec):
+    """`source` prunes against a declaration that has not landed yet, so one
+    intent costs one history entry. Inside a compound edit the document is out
+    of date -- Q33 §9, Q34 §5 and Q35 §7, each from a different side."""
+
+    def moved_on(self, name):
+        """A second document whose `T_PTOC` has lost `Str` and whose `T_ASG`
+        has lost `setMag`."""
+        return self.doc(specified(
+            declared_dos=(("StrVal", "T_ASG"), ("Beh", "T_ENS")),
+            asg_das=()), name=name)
+
+    def test_a_source_document_supplies_the_declaration(self):
+        doc = self.specified_doc("src_target.ssd")
+        source = self.moved_on("src_source.ssd")
+        self.pruned(doc, source=source)
+        # `Str` is gone from the new declaration and takes its subtree;
+        # `setMag` is gone from the new T_ASG; `Beh` survives untouched.
+        self.assertEqual([("DOS", "StrVal"), ("DOS", "Beh"),
+                          ("DAS", "stVal")] * 2, self.spec_names(doc))
+
+    def test_the_source_is_not_modified(self):
+        doc = self.specified_doc("src_ro_target.ssd")
+        source = self.moved_on("src_ro_source.ssd")
+        before = source.to_bytes()
+        self.applied(doc, prune_lnode_specification(
+            doc, "T_PTOC", source=source))
+        self.assertEqual(before, source.to_bytes())
+
+    def test_source_is_doc_means_exactly_what_omitting_it_means(self):
+        one = self.doc(specified(spec=fx.dos("TmAChr")), name="same_a.ssd")
+        two = self.doc(specified(spec=fx.dos("TmAChr")), name="same_b.ssd")
+        self.applied(one, prune_lnode_specification(one, "T_PTOC"))
+        self.applied(two, prune_lnode_specification(two, "T_PTOC",
+                                                    source=two))
+        self.assertEqual(one.to_bytes(), two.to_bytes())
+
+    def test_it_composes_with_update_lnode_type_in_one_history_entry(self):
+        # The point of `source`: prune against what is ABOUT to land, so the
+        # update and the prune are one undo step. Reading the target after
+        # the update was applied would work too, at the cost of two.
+        doc = self.specified_doc("compose_target.ssd")
+        source = self.moved_on("compose_source.ssd")
+        before = doc.to_bytes()
+        edits = (update_lnode_type(doc, source, "T_PTOC",
+                                   on_conflict="overwrite")
+                 + prune_lnode_specification(doc, "T_PTOC", source=source))
+        undo = self.applied(doc, edits)
+
+        declaration = self.find(doc, "LNodeType", id="T_PTOC")
+        self.assertEqual(["StrVal", "Beh"],
+                         [do.get("name") for do in declaration])
+        self.assertEqual([("DOS", "StrVal"), ("DOS", "Beh"),
+                          ("DAS", "stVal")] * 2, self.spec_names(doc))
+
+        doc.apply_edit(undo)
+        self.assertEqual(before, doc.to_bytes())

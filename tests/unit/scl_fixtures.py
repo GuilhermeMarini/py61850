@@ -15,6 +15,11 @@ the assertion it supports.
 
 SCL_NS = "http://www.iec.ch/61850/2003/SCL"
 
+#: IEC TR 61850-6-100, the namespace `DOS`/`SDS`/`DAS` live in. Declared
+#: with this prefix on the root, which is what IEC's own example SSDs do.
+SPEC_NS = "http://www.iec.ch/61850/2019/SCL/6-100"
+SPEC_PREFIX = "eIEC61850-6-100"
+
 
 def scl(*sections, **kwargs):
     """An `<SCL>` document containing `sections`, as a text string.
@@ -28,6 +33,10 @@ def scl(*sections, **kwargs):
     `sel.scd` declares no such prefix at all, which is why it is off by
     default here.
 
+    ``spec_ns=True`` declares IEC TR 61850-6-100 on the root under the
+    ``eIEC61850-6-100`` prefix, which is exactly how IEC's own example SSDs
+    declare it and what a document must do before any `DOS` may appear.
+
     ``version``/``revision``/``release`` set the SCHEMA EDITION attributes on
     the ``<SCL>`` root itself, as the standard puts them -- real files carry
     ``version="2007" revision="B" release="4"`` there, quite apart from
@@ -35,12 +44,15 @@ def scl(*sections, **kwargs):
     a test that does not care about the edition gets none.
     """
     ns = kwargs.pop("ns", True)
+    spec_ns = kwargs.pop("spec_ns", False)
     xsi = kwargs.pop("xsi", False)
     version = kwargs.pop("version", None)
     revision = kwargs.pop("revision", None)
     release = kwargs.pop("release", None)
     assert not kwargs, kwargs
     decl = f' xmlns="{SCL_NS}"' if ns else ""
+    if spec_ns:
+        decl += f' xmlns:{SPEC_PREFIX}="{SPEC_NS}"'
     if xsi:
         decl += ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
     root_attrs = ""
@@ -632,6 +644,53 @@ def connectivity_node(name, path_name):
     `update_bay` deliberately declines to repair.
     """
     return f'<ConnectivityNode name="{name}" pathName="{path_name}"/>'
+
+
+# -- IEC TR 61850-6-100: what an LNode must contain --------------------------
+#
+# `DOS`, `SDS` and `DAS` are in NEITHER SCL edition -- zero occurrences in the
+# `2007B4` and `2007C5` XSD sets. They are IEC TR 61850-6-100's, and in IEC's
+# own example SSDs all 106 of them sit at
+# `LNode/Private[@type="eIEC61850-6-100"]/DOS`. These builders reproduce that
+# SHAPE; no IEC content is copied. `spec_private` writes the convention the
+# files use, and `dos` on its own writes the OTHER schema-valid placement --
+# a direct child of the `LNode`, which is what the TR's annotation asks for.
+
+def dos(name, body="", **attrs):
+    """A `<DOS>`: the specification of one data object.
+
+    Written with the `eIEC61850-6-100` prefix, so a document carrying one must
+    have been built with ``scl(..., spec_ns=True)``.
+    """
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return (f'<{SPEC_PREFIX}:DOS name="{name}"{extra}>{body}'
+            f'</{SPEC_PREFIX}:DOS>')
+
+
+def sds(name, body="", **attrs):
+    """An `<SDS>`. Named for a sub-Data Object and used for neither: all 17 in
+    `Eng POC.ssd` name a `DA` with ``bType="Struct"``."""
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return (f'<{SPEC_PREFIX}:SDS name="{name}"{extra}>{body}'
+            f'</{SPEC_PREFIX}:SDS>')
+
+
+def das(name, body="", **attrs):
+    """A `<DAS>`: a leaf in the schema -- `tDAS` declares no nested `DAS` or
+    `SDS`, so depth is always spelled `SDS`."""
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return (f'<{SPEC_PREFIX}:DAS name="{name}"{extra}>{body}'
+            f'</{SPEC_PREFIX}:DAS>')
+
+
+def spec_private(body):
+    """The `<Private>` IEC's files wrap a specification in.
+
+    The `@type` is the files' convention and appears nowhere in the 6-100
+    schema, which is why the library keys on the namespace instead. A fixture
+    writes it anyway, because that is what a real SSD looks like.
+    """
+    return f'<Private type="{SPEC_PREFIX}">{body}</Private>'
 
 
 def terminal(connectivity_node_path, c_node_name, name="T1", tag="Terminal",
