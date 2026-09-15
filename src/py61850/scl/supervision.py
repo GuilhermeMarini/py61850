@@ -230,6 +230,7 @@ from .data_set import _limit, _services_child
 from .document import strip_ns
 from .edit import EditRejected, Insert, Remove, SetTextContent
 from .extref import source_control_block
+from .generator import LN_INST_RANGE as _LN_INST_RANGE
 from .ordering import reference_for
 
 #: The logical node classes that supervise a subscription. `tLN@lnClass` is an
@@ -259,10 +260,14 @@ _REFERENCE_DO = {"LGOS": "GoCBRef", "LSVS": "SvCBRef"}
 # The `SupSubscription` attribute that limits each class.
 _LIMIT_ATTRIBUTE = {"LGOS": "maxGo", "LSVS": "maxSv"}
 
-#: The range 61850-6 allows for `tLN@inst`, and therefore the range an
-#: allocated instance number is drawn from. The reference documents the same
-#: bounds for its own generator.
-LN_INST_RANGE = (1, 99)
+#: Re-exported from :mod:`py61850.scl.generator`, which owns allocation.
+#:
+#: **It used to say "the range 61850-6 allows for `tLN@inst`" and that was
+#: wrong**: ``tLNInst`` is ``[0-9]{1,12}`` in both editions. The bound is the
+#: reference's convention, the corpus exceeds it 232 times, and A17's module
+#: docstring carries the measurement. The value is unchanged and so is every
+#: allocation made from it.
+LN_INST_RANGE = _LN_INST_RANGE
 
 class MaxSupervision(NamedTuple):
     """How many subscriptions an IED declares it can supervise.

@@ -82,6 +82,12 @@ follow and are checked against fixtures built for them, where a read model
 would have to decide what a `Bay` IS to a consumer -- and that is the decision
 no corpus file is available to referee.
 
+Allocation is :mod:`py61850.scl.generator`'s --
+:func:`~py61850.scl.next_mac_address`, :func:`~py61850.scl.next_app_id`,
+:func:`~py61850.scl.next_ln_inst` and
+:func:`~py61850.scl.unique_element_name`. They answer "what is free?" and
+build no edit; seven modules defer to them for a value they refuse to invent.
+
 That module also carries :func:`~py61850.scl.prune_lnode_specification`, which
 is the one place a **second IEC namespace** enters this package: IEC TR
 61850-6-100's `DOS`, `SDS` and `DAS`, which specify what an `LNode` must
@@ -182,6 +188,17 @@ from .document import (
     privates_of,
     strip_ns,
 )
+from .generator import (
+    APP_ID_RANGES,
+    LN_INST_ELEMENTS,
+    LN_INST_RANGE,
+    MAC_ADDRESS_PREFIXES,
+    SERVICE_TYPES,
+    next_app_id,
+    next_ln_inst,
+    next_mac_address,
+    unique_element_name,
+)
 from .ied import (
     IED_NAME_ELEMENTS,
     ORPHAN_IED_NAME,
@@ -190,7 +207,6 @@ from .ied import (
     update_ied,
 )
 from .supervision import (
-    LN_INST_RANGE,
     SUPERVISION_LN_CLASSES,
     SUPERVISION_REFERENCE_DOS,
     MaxSupervision,
@@ -287,4 +303,7 @@ __all__ = [
     "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
     "prune_lnode_specification", "SPECIFICATION_NS",
     "SPECIFICATION_ELEMENTS",
+    "next_mac_address", "next_app_id", "next_ln_inst", "unique_element_name",
+    "MAC_ADDRESS_PREFIXES", "APP_ID_RANGES", "LN_INST_ELEMENTS",
+    "SERVICE_TYPES",
 ]
