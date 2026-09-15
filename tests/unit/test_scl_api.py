@@ -71,6 +71,9 @@ class TestSurface(unittest.TestCase):
             "same_data_type", "lnode_type_conflicts", "TypeImport",
             "import_lnode_types", "update_lnode_type", "remove_data_type",
             "DATA_TYPE_TAGS", "ON_CONFLICT",
+            "update_substation", "update_voltage_level", "update_bay",
+            "remove_process_element", "TERMINAL_ELEMENTS",
+            "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
         ]))
 
     def test_the_dtd_refusal_is_public(self):

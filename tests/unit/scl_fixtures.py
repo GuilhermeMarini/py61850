@@ -557,3 +557,102 @@ def supervision_types(ln_class="LGOS", val_kind="RO", val_import="true",
                        dos=((ref_do, f"ORG_{type_id}"),
                             ("DatSet", f"ORG_{type_id}"))),
             do_type(f"ORG_{type_id}", cdc="ORG", das=(da,)))
+
+
+# -- the Substation section -------------------------------------------------
+#
+# **Nothing in the corpus shapes these.** All twenty-three Substation-section
+# element names are zero in `sel.scd`, `mixed.scd` and `siemens.scd`, in every
+# namespace, and `test_scl_substation.py` asserts that. What they are shaped
+# by instead is IEC's own published example -- `Eng POC.ssd` from
+# `IEC_TR_61850-90-30.SSD.2024A1`, which is IEC copyright and ships with
+# nothing: one `Substation`, one `VoltageLevel`, three `Bay`, seven
+# `ConnectivityNode` and fourteen `Terminal`, with two of those terminals
+# sitting in one bay while naming another. These builders exist to reproduce
+# that SHAPE from scratch; no IEC content is copied.
+
+def substation(name, body="", **attrs):
+    """A `<Substation>`. A direct child of `SCL`, or of a `Process`."""
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<Substation name="{name}"{extra}>{body}</Substation>'
+
+
+def voltage_level(name, body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<VoltageLevel name="{name}"{extra}>{body}</VoltageLevel>'
+
+
+def bay(name, body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<Bay name="{name}"{extra}>{body}</Bay>'
+
+
+def line(name, body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<Line name="{name}"{extra}>{body}</Line>'
+
+
+def process(name, body="", **attrs):
+    extra = "".join(f' {k}="{v}"' for k, v in sorted(attrs.items()))
+    return f'<Process name="{name}"{extra}>{body}</Process>'
+
+
+def conducting_equipment(name, type_="CBR", body=""):
+    return (f'<ConductingEquipment name="{name}" type="{type_}">'
+            f'{body}</ConductingEquipment>')
+
+
+def general_equipment(name, type_="BAT", body=""):
+    return (f'<GeneralEquipment name="{name}" type="{type_}">'
+            f'{body}</GeneralEquipment>')
+
+
+def power_transformer(name, type_="PTR", body=""):
+    return (f'<PowerTransformer name="{name}" type="{type_}">'
+            f'{body}</PowerTransformer>')
+
+
+def transformer_winding(name, type_="PTW", body=""):
+    return (f'<TransformerWinding name="{name}" type="{type_}">'
+            f'{body}</TransformerWinding>')
+
+
+def substation_function(name, body=""):
+    """A `<Function>`. Named so it does not shadow the builtin, and because a
+    `Function` inside a `Bay` is one of the named siblings a `Bay` rename
+    collides with -- `uniqueChildNameInVoltageLevel` selects `./*`."""
+    return f'<Function name="{name}">{body}</Function>'
+
+
+def connectivity_node(name, path_name):
+    """A `<ConnectivityNode>`.
+
+    `pathName` is `use="required"` and is passed in rather than derived, so a
+    test can build one that DISAGREES with its ancestry -- which is the case
+    `update_bay` deliberately declines to repair.
+    """
+    return f'<ConnectivityNode name="{name}" pathName="{path_name}"/>'
+
+
+def terminal(connectivity_node_path, c_node_name, name="T1", tag="Terminal",
+             **path_attrs):
+    """A `<Terminal>`, or with ``tag="NeutralPoint"`` the other element typed
+    `tTerminal`.
+
+    ``path_attrs`` are the optional container names -- ``substation_name``,
+    ``voltage_level_name``, ``bay_name``, ``line_name``, ``process_name`` --
+    spelled in Python and written out in the schema's camelCase. They are
+    OPTIONAL in the schema and this builder omits any that is not given, which
+    is what lets a test show that a rename does not invent one.
+    """
+    spelling = {
+        "substation_name": "substationName",
+        "voltage_level_name": "voltageLevelName",
+        "bay_name": "bayName",
+        "line_name": "lineName",
+        "process_name": "processName",
+    }
+    extra = "".join(f' {spelling[k]}="{v}"'
+                    for k, v in sorted(path_attrs.items()))
+    return (f'<{tag} name="{name}" connectivityNode="{connectivity_node_path}"'
+            f'{extra} cNodeName="{c_node_name}"/>')

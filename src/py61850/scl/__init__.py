@@ -68,10 +68,19 @@ This package is never imported by ``py61850`` itself, so the MMS client keeps
 installing and running unprivileged on any OS. It is pure ``xml.etree`` over
 the standard library: no network, no privileges, no dependencies.
 
-**Not implemented yet**, because no file in the reference corpus carries them:
+**No READ MODEL yet**, because no file in the reference corpus carries them:
 the ``Substation`` section (VoltageLevel/Bay/ConductingEquipment) and ``Log``.
 Both are in the schema; neither has test material, and building a tree with
 nothing to check it against is how a reader acquires confident wrong answers.
+
+The **edit** layer does cover the Substation section --
+:func:`~py61850.scl.update_substation`, :func:`~py61850.scl.update_voltage_level`,
+:func:`~py61850.scl.update_bay` and :func:`~py61850.scl.remove_process_element`
+in :mod:`py61850.scl.substation`. The distinction is real rather than a
+hedge: those four read the tree directly, ask the schema what a rename must
+follow and are checked against fixtures built for them, where a read model
+would have to decide what a `Bay` IS to a consumer -- and that is the decision
+no corpus file is available to referee.
 """
 
 from ._xmlsafe import DtdNotAllowed, reject_dtd_in_bytes, reject_dtd_in_file
@@ -136,6 +145,15 @@ from .sampled_value_control import (
     can_add_sampled_value_control,
     create_sampled_value_control,
     update_sampled_value_control,
+)
+from .substation import (
+    CONTAINER_NAME_ATTRIBUTES,
+    PROCESS_SECTIONS,
+    TERMINAL_ELEMENTS,
+    remove_process_element,
+    update_bay,
+    update_substation,
+    update_voltage_level,
 )
 from .controls import (
     CONTROL_BLOCK_TAGS,
@@ -253,4 +271,7 @@ __all__ = [
     "same_data_type", "lnode_type_conflicts", "TypeImport",
     "import_lnode_types", "update_lnode_type", "remove_data_type",
     "DATA_TYPE_TAGS", "ON_CONFLICT",
+    "update_substation", "update_voltage_level", "update_bay",
+    "remove_process_element", "TERMINAL_ELEMENTS",
+    "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
 ]
