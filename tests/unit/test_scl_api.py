@@ -76,6 +76,9 @@ class TestSurface(unittest.TestCase):
             "CONTAINER_NAME_ATTRIBUTES", "PROCESS_SECTIONS",
             "prune_lnode_specification", "SPECIFICATION_NS",
             "SPECIFICATION_ELEMENTS",
+            "next_mac_address", "next_app_id", "next_ln_inst",
+            "unique_element_name", "MAC_ADDRESS_PREFIXES", "APP_ID_RANGES",
+            "LN_INST_ELEMENTS", "SERVICE_TYPES",
         ]))
 
     def test_the_dtd_refusal_is_public(self):
