@@ -40,8 +40,6 @@ file -- 0.7 ms even on a document padded with a 500 kB comment, which is the
 shape that would defeat a "look at the first N bytes" check.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import BinaryIO
 from xml.parsers import expat

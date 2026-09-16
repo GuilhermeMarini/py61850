@@ -49,7 +49,7 @@ class TestIedHeaders(_Base):
     def test_headers_do_not_build_instance_trees(self):
         d = self.doc(fx.ied("A", body=fx.access_point(
             body=fx.ldevice("PRO", body=fx.ln0()))))
-        d.ied_headers
+        _ = d.ied_headers           # read for the side effect it must NOT have
         self.assertNotIn("ied:A", d._cache)
 
     def test_a_private_ied_lookalike_does_not_shadow_the_real_ied(self):

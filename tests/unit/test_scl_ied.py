@@ -26,9 +26,9 @@ import unittest
 from collections import Counter
 
 from py61850.scl import (
-    EditRejected,
     IED_NAME_ELEMENTS,
     ORPHAN_IED_NAME,
+    EditRejected,
     Insert,
     Remove,
     SclDocument,
@@ -1661,7 +1661,7 @@ class TestInsertCorpus(unittest.TestCase):
             theirs = self.ln_types(self.named(source, name))
             self.assertEqual(len(mine), len(theirs))
             total += len(mine)
-            moved += sum(1 for a, b in zip(mine, theirs) if a != b)
+            moved += sum(1 for a, b in zip(mine, theirs, strict=True) if a != b)
         self.assertEqual(total, 350)
         self.assertEqual(moved, 228)
 

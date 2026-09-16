@@ -176,14 +176,11 @@ takes and returns live ELEMENTS, so a caller working in elements is never
 stale. See Q14, which A13 is where it is answered.
 """
 
-from __future__ import annotations
-
-from typing import List, NamedTuple, Optional, Tuple
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from .control_block import control_blocks, updated_conf_rev
 from .document import strip_ns
-from .generator import _allocated_name
 from .edit import EditRejected, Insert, Remove, SetAttributes
 from .extref import (
     _ancestor,
@@ -193,6 +190,7 @@ from .extref import (
     match_src_attributes,
     unsubscribe,
 )
+from .generator import _allocated_name
 from .ordering import may_contain, reference_for
 
 #: The elements 61850-6 lets a `DataSet` hang off. `DataSet` is a child of
@@ -265,7 +263,7 @@ def _data_sets_under(scope, namespace) -> int:
 
 # -- the declared limits ----------------------------------------------------
 
-def _services_child(doc, element, local_name) -> Optional[Tuple[ET.Element, str, ET.Element]]:
+def _services_child(doc, element, local_name) -> tuple[ET.Element, str, ET.Element] | None:
     """``(declaration, scope name, scope element)`` governing ``element``.
 
     ``local_name`` is the `Services` child that carries the limit --
@@ -294,12 +292,12 @@ def _services_child(doc, element, local_name) -> Optional[Tuple[ET.Element, str,
     return None
 
 
-def _conf_data_set(doc, element) -> Optional[Tuple[ET.Element, str, ET.Element]]:
+def _conf_data_set(doc, element) -> tuple[ET.Element, str, ET.Element] | None:
     """``(ConfDataSet, scope name, scope element)`` governing ``element``."""
     return _services_child(doc, element, "ConfDataSet")
 
 
-def _limit(conf, attribute) -> Optional[int]:
+def _limit(conf, attribute) -> int | None:
     """``conf``'s ``attribute`` as a positive integer, or ``None``.
 
     An unparseable or absent limit is not a limit. `max` is
@@ -317,7 +315,7 @@ def _limit(conf, attribute) -> Optional[int]:
     return value if value >= 0 else None
 
 
-def max_attributes(doc, fcda_or_data_set) -> Optional[MaxAttributes]:
+def max_attributes(doc, fcda_or_data_set) -> MaxAttributes | None:
     """How many members the dataset ``fcda_or_data_set`` belongs to may hold.
 
     ``fcda_or_data_set`` is an `FCDA`, as the reference takes, or the
@@ -382,7 +380,7 @@ def can_add_fcda(doc, data_set) -> bool:
 
 # -- who takes what a member publishes --------------------------------------
 
-def _member_keys(fcdas) -> Tuple[set, set]:
+def _member_keys(fcdas) -> tuple[set, set]:
     """``(exact, whole)`` lookup keys for a set of dataset members.
 
     ``exact`` holds the six data attributes of every member; ``whole`` holds
@@ -406,7 +404,7 @@ def _member_keys(fcdas) -> Tuple[set, set]:
     return exact, whole
 
 
-def _subscriptions_to(doc, fcdas) -> List[ET.Element]:
+def _subscriptions_to(doc, fcdas) -> list[ET.Element]:
     """Every `ExtRef` whose binding these members satisfy, in document order.
 
     One sweep of the document's ExtRefs against all the members at once: a
@@ -448,7 +446,7 @@ def _subscriptions_to(doc, fcdas) -> List[ET.Element]:
     return out
 
 
-def fcda_subscriptions(doc, fcda) -> List[ET.Element]:
+def fcda_subscriptions(doc, fcda) -> list[ET.Element]:
     """Every `ExtRef` that would be left dangling if ``fcda`` were removed.
 
     A member is taken by an `ExtRef` bound to exactly what it publishes, and
@@ -469,7 +467,7 @@ def fcda_subscriptions(doc, fcda) -> List[ET.Element]:
 
 # -- confRev ----------------------------------------------------------------
 
-def updated_conf_rev_edits(doc, data_set, exclude=()) -> List[SetAttributes]:
+def updated_conf_rev_edits(doc, data_set, exclude=()) -> list[SetAttributes]:
     """The `confRev` edits for every control block publishing ``data_set``.
 
     A9's :func:`~py61850.scl.updated_conf_rev` is the rule for ONE block and
@@ -495,7 +493,7 @@ def updated_conf_rev_edits(doc, data_set, exclude=()) -> List[SetAttributes]:
 # -- element creation -------------------------------------------------------
 
 def create_data_set(doc, parent, name=None, desc=None, force=False,
-                    taken=()) -> List:
+                    taken=()) -> list:
     """The edit that adds a new `DataSet` to ``parent``.
 
     ``parent`` is an `LN0` or an `LN`. The element is placed by A7's
@@ -549,7 +547,10 @@ def create_data_set(doc, parent, name=None, desc=None, force=False,
             f"a DataSet named {name!r} is already in this "
             f"{strip_ns(parent.tag)}")
     if not force and not can_add_data_set(doc, parent):
-        conf, scope, owner = _conf_data_set(doc, parent)
+        # `can_add_data_set` returned False BECAUSE a ConfDataSet was found and
+        # its maximum reached, so this cannot be None. That is load-bearing and
+        # was written nowhere until here.
+        conf, scope, owner = _conf_data_set(doc, parent)   # type: ignore[misc]
         raise EditRejected(
             f"{owner.get('name') or scope} already holds "
             f"{_data_sets_under(owner, _namespace(parent.tag))} DataSet "
@@ -565,7 +566,7 @@ def create_data_set(doc, parent, name=None, desc=None, force=False,
 
 # -- edit checks ------------------------------------------------------------
 
-def update_data_set(doc, edit) -> List:
+def update_data_set(doc, edit) -> list:
     """``edit`` corrected: every control block that publishes it re-pointed.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on a `DataSet`. If its
@@ -624,7 +625,7 @@ def update_data_set(doc, edit) -> List:
 
 
 def remove_data_set(doc, edit, ignore_supervision=True,
-                    update_conf_rev=True) -> List:
+                    update_conf_rev=True) -> list:
     """``edit`` expanded: the dataset, its subscribers, and its publishers.
 
     ``edit`` is a :class:`~py61850.scl.Remove` whose node is a `DataSet`. What
@@ -670,7 +671,7 @@ def remove_data_set(doc, edit, ignore_supervision=True,
 
 
 def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
-                            update_conf_rev, ignore_supervision=True) -> List:
+                            update_conf_rev, ignore_supervision=True) -> list:
     """Everything a `DataSet` removal drags with it, apart from the removal.
 
     Shared with A9's :func:`~py61850.scl.remove_control_block`, which removes
@@ -688,7 +689,7 @@ def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
     handled = {id(ext_ref) for ext_ref in already}
     excluded = {id(block) for block in exclude_blocks}
 
-    edits: List = []
+    edits: list = []
     members = _same_ns_children(data_set, "FCDA")
     subscribers = [ext_ref for ext_ref in _subscriptions_to(doc, members)
                    if id(ext_ref) not in handled]
@@ -699,7 +700,7 @@ def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
     for block in control_blocks(doc, data_set):
         if id(block) in excluded:
             continue
-        attributes = {"datSet": None}
+        attributes: dict[str, str | None] = {"datSet": None}
         if update_conf_rev:
             attributes["confRev"] = updated_conf_rev(block)
         edits.append(SetAttributes(block, attributes))
@@ -707,7 +708,7 @@ def _expand_remove_data_set(doc, data_set, exclude_blocks, already,
 
 
 def remove_fcda(doc, edits, ignore_supervision=True,
-                update_conf_rev=True) -> List:
+                update_conf_rev=True) -> list:
     """``edits`` expanded: the members, their subscribers, and every `confRev`.
 
     ``edits`` is one :class:`~py61850.scl.Remove` of an `FCDA` or a list of
@@ -779,7 +780,7 @@ def remove_fcda(doc, edits, ignore_supervision=True,
                 f"{data_set.get('name')!r} empty, and 61850-6 requires at "
                 f"least one FCDA; remove the DataSet itself instead")
 
-    out: List = list(edits)
+    out: list = list(edits)
     handled: set = set()
     for _data_set, going in affected.values():
         subscribers = [ext_ref for ext_ref in _subscriptions_to(doc, going)

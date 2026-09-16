@@ -28,6 +28,7 @@ cannot be skipped; this file states the behaviour one primitive at a time,
 which is what a generator's failures have to be read against.
 """
 
+import dataclasses
 import tempfile
 import unittest
 from xml.etree import ElementTree as ET
@@ -550,7 +551,7 @@ class TestEditsAreValues(_Base):
                             SetAttributes(el, {"desc": "b"}))
 
     def test_an_edit_cannot_be_changed_after_it_is_made(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             Remove(self.one("ExtRef")).node = self.doc.root
 
     def test_the_mapping_is_copied_so_a_caller_cannot_reach_back_into_it(self):

@@ -112,9 +112,9 @@ def _station():
         for name in ("REL1", "REL2", "REL3"))
     comm = fx.communication(fx.subnetwork("SUB1", aps=[
         fx.connected_ap(name, body=(
-            fx.address(P_IP="192.0.2.%d" % (10 + i),
+            fx.address(P_IP=f"192.0.2.{10 + i}",
                        P_IP_SUBNET="255.255.255.0")
-            + fx.gse("LD0", "GC1", addr=fx.address(P_MAC_Address="01-0C-CD-01-00-0%d" % i),
+            + fx.gse("LD0", "GC1", addr=fx.address(P_MAC_Address=f"01-0C-CD-01-00-0{i}"),
                      min_time="4", max_time="1000")))
         for i, name in enumerate(("REL1", "REL2", "REL3"))]))
     types = fx.templates(

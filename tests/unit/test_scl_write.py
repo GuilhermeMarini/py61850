@@ -110,11 +110,11 @@ class TestTheProlog(_Base):
         and the spacing are left as they were.
         """
         source = ("<?xml version='1.0' encoding='ISO-8859-1'?>\n"
-                  '<SCL xmlns="%s">\n  <Header id="Subestação" />\n</SCL>\n'
-                  % SCL).encode("iso-8859-1")
+                  f'<SCL xmlns="{SCL}">\n'
+                  '  <Header id="Subestação" />\n</SCL>\n').encode("iso-8859-1")
         out = self.out(source)
         self.assertIn(b"<?xml version='1.0' encoding='utf-8'?>", out)
-        self.assertIn("Subestação".encode("utf-8"), out)
+        self.assertIn("Subestação".encode(), out)
         # And the result actually is what it now says it is: parsed back with
         # nothing told about the encoding, the accented name survives.
         self.assertEqual("Subestação", ET.fromstring(out)[0].get("id"))

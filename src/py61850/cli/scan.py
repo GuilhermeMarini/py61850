@@ -34,7 +34,7 @@ Pure Python, standard library only.  Usage:
 import argparse
 import sys
 
-from .. import MmsClient, MmsError, decode_read_response, decode_data_definition
+from .. import MmsClient, decode_data_definition, decode_read_response
 
 
 def hr(title):
@@ -54,7 +54,7 @@ def labeled_read(c, ld, obj):
     except Exception:
         names = None
     if names and isinstance(val, list) and len(names) == len(val):
-        return dict(zip(names, val))
+        return dict(zip(names, val, strict=True))
     return val
 
 
@@ -218,7 +218,9 @@ def _label_rcb(c, ld, name):
     vals = decode_read_response(c.read(ld, name))
     v = vals[0] if vals else None
     if isinstance(v, list) and len(v) <= len(_BRCB_MEMBERS):
-        return dict(zip(_BRCB_MEMBERS, v))
+        # `<=`, not `==`: a relay is free to return fewer members than the
+        # BRCB defines, and labelling the ones it did send is the point.
+        return dict(zip(_BRCB_MEMBERS, v, strict=False))
     return v
 
 

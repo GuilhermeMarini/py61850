@@ -108,9 +108,6 @@ update function -- `mixed.scd` holds 256 `ExtRef` elements with
 :mod:`py61850.scl.report_control`'s docstring and in Q29.
 """
 
-from __future__ import annotations
-
-from typing import List
 from xml.etree import ElementTree as ET
 
 from .address import connected_ap_for, create_smv
@@ -122,9 +119,9 @@ from .control_block import (
 )
 from .data_set import _limit, _namespace, _services_child
 from .document import strip_ns
-from .generator import _allocated_name
 from .edit import EditRejected, Insert, SetAttributes
 from .extref import _ancestor, _ied_name, _qualify, _same
+from .generator import _allocated_name
 from .ordering import may_contain, reference_for
 from .report_control import _has_data_set, _name_clash, _resolve_parent
 
@@ -195,7 +192,7 @@ def create_sampled_value_control(doc, parent, name=None, desc=None,
                                  security_enable=None, conf_rev="1",
                                  smv_opts=None, ap_name=None, mac=None,
                                  app_id=None, vlan_id=None, vlan_priority=None,
-                                 force=False, taken=()) -> List:
+                                 force=False, taken=()) -> list:
     """The edits that add a `SampledValueControl` and address it.
 
     ``parent`` is an `LN0`, or an `LDevice`, `AccessPoint` or `IED` whose
@@ -247,7 +244,9 @@ def create_sampled_value_control(doc, parent, name=None, desc=None,
             f"no DataSet named {dat_set!r} is in this LN0; datSet is an "
             f"xs:keyref and resolves in the logical node")
     if not force and not can_add_sampled_value_control(doc, node):
-        conf, scope, owner = _services_child(doc, node, "SMVsc")
+        # As in `data_set`: `can_add_sampled_value_control` returned False
+        # because an SMVsc was found and its maximum reached.
+        conf, scope, owner = _services_child(doc, node, "SMVsc")   # type: ignore[misc]
         raise EditRejected(
             f"{owner.get('name') or scope} already holds "
             f"{_count_under(owner)} SampledValueControl elements, which is "
@@ -269,7 +268,7 @@ def create_sampled_value_control(doc, parent, name=None, desc=None,
     for attribute, value in (smv_opts or {}).items():
         options.set(attribute, value)
 
-    edits: List = [Insert(node, element, reference_for(node, element.tag))]
+    edits: list = [Insert(node, element, reference_for(node, element.tag))]
 
     connected_ap = connected_ap_for(doc, _ied_name(doc, node), ap_name)
     if connected_ap is not None:
@@ -284,7 +283,7 @@ def create_sampled_value_control(doc, parent, name=None, desc=None,
 
 # -- edit checks ------------------------------------------------------------
 
-def update_sampled_value_control(doc, edit, ignore_supervision=True) -> List:
+def update_sampled_value_control(doc, edit, ignore_supervision=True) -> list:
     """``edit`` corrected: the dataset, the address, and every subscriber.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on a
@@ -334,12 +333,12 @@ def update_sampled_value_control(doc, edit, ignore_supervision=True) -> List:
 
     from .report_control import _rename_edits
 
-    edits: List = list(update_dat_set(doc, edit))
+    edits: list = list(update_dat_set(doc, edit))
     # `_rename_edits` validates the new name as well as producing the
     # subscriber edits, so it runs before anything is appended.
     subscribers = _rename_edits(doc, control, edit)
     wanted = edit.attributes.get("name")
-    supervision: List = []
+    supervision: list = []
     if "name" in edit.attributes and not _same(wanted, control.get("name")):
         address = control_block_gse_or_smv(doc, control)
         if address is not None:

@@ -1,0 +1,28 @@
+# Adopted in A18b, deliberately AFTER the v0.5.0 tag: editing dozens of sites to
+# satisfy tooling on the day of a release is a last-minute change to the thing
+# being released. The tag is also what made the ruleset affordable. `UP` is in
+# only because 0.5.0 raised the floor to 3.13: measured on this tree, 189 of 214
+# findings are auto-fixable at `py313` against 16 at the old `>=3.9`, so the two
+# decisions were connected rather than independent.
+#
+# No formatter is configured, here or anywhere else in this workspace: ruff
+# LINTS, it does not reformat. Line length matches what the tree already writes.
+line-length = 88
+target-version = "py313"
+src = ["src", "tests", "tools", "examples"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",   # long lines: the measured comments in this tree are the docs
+]
+
+# The 2,844 generated lines in `scl/_nsd_types.py` and `scl/_content_models.py`
+# are NOT excluded, and that is a decision rather than an oversight. Q7 assumed
+# they were the reason to scope a linter narrowly; measured, they produce zero
+# findings under this exact ruleset. An exclusion would be configuration
+# asserting a risk of zero, and it would silently cover both files if a future
+# generator ever started emitting something worth flagging.
+
+[lint.isort]
+known-first-party = ["py61850"]

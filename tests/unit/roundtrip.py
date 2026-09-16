@@ -67,7 +67,6 @@ line-ending case both still fail on the same CRLF -- it is what keeps the
 comment case answering only whether a comment is still there.
 """
 
-import io
 import re
 from pathlib import Path
 
@@ -304,7 +303,10 @@ def _differing_lines(left, right):
     """How many lines differ, counting a length mismatch as differing lines."""
     a = left.split(b"\n")
     b = right.split(b"\n")
-    return sum(1 for x, y in zip(a, b) if x != y) + abs(len(a) - len(b))
+    # `strict=False`: the length mismatch is counted by the term after it,
+    # so this zip has to truncate rather than raise.
+    return (sum(1 for x, y in zip(a, b, strict=False) if x != y)
+            + abs(len(a) - len(b)))
 
 
 def round_trip(name):

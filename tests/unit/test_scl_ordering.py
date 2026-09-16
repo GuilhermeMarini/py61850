@@ -44,7 +44,7 @@ from py61850.scl import (
     reference_for,
 )
 from py61850.scl._content_models import CONTENT_MODELS
-from py61850.scl.ordering import ANY, _RANKS
+from py61850.scl.ordering import _RANKS, ANY
 from tests.unit import roundtrip
 
 REPO = Path(__file__).resolve().parents[2]
@@ -78,7 +78,10 @@ def ranks_of(parent):
 def is_ordered(parent):
     """Whether this parent's children are in an order the table permits."""
     ranks = [r for _, r in ranks_of(parent)]
-    return all(a <= b for a, b in zip(ranks, ranks[1:]))
+    # `strict=False` and not True: this is the pairwise idiom, so the two
+    # sequences differ in length by one BY CONSTRUCTION and `strict=True`
+    # would raise on every call.
+    return all(a <= b for a, b in zip(ranks, ranks[1:], strict=False))
 
 
 class TestTheTableIsTheSchema(unittest.TestCase):

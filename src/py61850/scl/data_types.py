@@ -162,10 +162,8 @@ distinguishes them: there the caller removed a device and an unused
 `LNodeType` is ordinary, here the caller named a type.
 """
 
-from __future__ import annotations
-
 import copy
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from .document import children_local, strip_ns
@@ -217,10 +215,10 @@ class TypeImport(NamedTuple):
     caller's preview list them in the same order every time.
     """
 
-    ids: Dict[Tuple[str, str], str]
-    added: Tuple[Tuple[str, str], ...]
-    reused: Tuple[Tuple[str, str], ...]
-    conflicts: Tuple[Tuple[str, str], ...]
+    ids: dict[tuple[str, str], str]
+    added: tuple[tuple[str, str], ...]
+    reused: tuple[tuple[str, str], ...]
+    conflicts: tuple[tuple[str, str], ...]
 
 
 # -- sameness ---------------------------------------------------------------
@@ -254,7 +252,7 @@ def same_data_type(ours, theirs) -> bool:
         return False
     if len(ours) != len(theirs):
         return False
-    return all(same_data_type(a, b) for a, b in zip(ours, theirs))
+    return all(same_data_type(a, b) for a, b in zip(ours, theirs, strict=True))
 
 
 # -- the pools --------------------------------------------------------------
@@ -282,7 +280,7 @@ def _root_of(document):
     return root
 
 
-def _section(root) -> Optional[ET.Element]:
+def _section(root) -> ET.Element | None:
     """The `DataTypeTemplates` element, or ``None``.
 
     Direct child of the root only, which is
@@ -293,7 +291,7 @@ def _section(root) -> Optional[ET.Element]:
     return next(iter(children_local(root, "DataTypeTemplates")), None)
 
 
-def _pool(root) -> Dict[Tuple[str, str], ET.Element]:
+def _pool(root) -> dict[tuple[str, str], ET.Element]:
     """``{(kind, id): element}`` for one document's `DataTypeTemplates`.
 
     Built per call. These functions hand an edit back and never apply it, so a
@@ -301,7 +299,7 @@ def _pool(root) -> Dict[Tuple[str, str], ET.Element]:
     `ied.py`'s object-reference index is built per call for the same reason.
     """
     section = _section(root)
-    pool: Dict[Tuple[str, str], ET.Element] = {}
+    pool: dict[tuple[str, str], ET.Element] = {}
     if section is None:
         return pool
     for kind in DATA_TYPE_TAGS:
@@ -312,7 +310,7 @@ def _pool(root) -> Dict[Tuple[str, str], ET.Element]:
     return pool
 
 
-def _referenced(element, kind) -> List[Tuple[str, str]]:
+def _referenced(element, kind) -> list[tuple[str, str]]:
     """The ``(kind, id)`` every child of ``element`` points at.
 
     `DA` and `BDA` carry one `type` attribute meaning either a `DAType` or an
@@ -320,7 +318,7 @@ def _referenced(element, kind) -> List[Tuple[str, str]]:
     `Timestamp`, the 20-odd basic types -- names no template at all and its
     `type` attribute, if the file writes one, is not a reference here.
     """
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for child_name, attribute, referenced, btype in _REFERENCES.get(kind, ()):
         for child in children_local(element, child_name):
             if btype is not None and child.get("bType") != btype:
@@ -331,7 +329,7 @@ def _referenced(element, kind) -> List[Tuple[str, str]]:
     return out
 
 
-def _closure(pool, roots) -> List[Tuple[str, str]]:
+def _closure(pool, roots) -> list[tuple[str, str]]:
     """Every ``(kind, id)`` reachable from ``roots``, in discovery order.
 
     Breadth-first so the `LNodeType` named by the caller come first and their
@@ -349,7 +347,7 @@ def _closure(pool, roots) -> List[Tuple[str, str]]:
     that no corpus file contains one.
     """
     seen = set()
-    order: List[Tuple[str, str]] = []
+    order: list[tuple[str, str]] = []
     queue = list(roots)
     while queue:
         key = queue.pop(0)
@@ -402,7 +400,7 @@ def _fresh_id(kind, id_, taken) -> str:
         n += 1
 
 
-def _agrees(target_pool, source_pool, order, replacing) -> Dict[Tuple[str, str], bool]:
+def _agrees(target_pool, source_pool, order, replacing) -> dict[tuple[str, str], bool]:
     """Whether the target's copy of each type means the same as the source's.
 
     **Comparing the two elements is not enough, and this is the defect that
@@ -521,10 +519,10 @@ def _plan(doc, source, ids, on_conflict, replacing) -> TypeImport:
     # it is Q33 §9's hazard one level up: inside a compound edit the document
     # is out of date, so the batch has to be its own record.
     taken = set(target_pool) | set(order)
-    mapping: Dict[Tuple[str, str], str] = {}
-    added: List[Tuple[str, str]] = []
-    reused: List[Tuple[str, str]] = []
-    conflicts: List[Tuple[str, str]] = []
+    mapping: dict[tuple[str, str], str] = {}
+    added: list[tuple[str, str]] = []
+    reused: list[tuple[str, str]] = []
+    conflicts: list[tuple[str, str]] = []
 
     for key in order:
         kind, id_ = key
@@ -593,7 +591,7 @@ def _repoint(node, kind, mapping) -> None:
                 child.set(attribute, mapping[(referenced, target)])
 
 
-def import_lnode_types(doc, source, ids, on_conflict="refuse") -> List:
+def import_lnode_types(doc, source, ids, on_conflict="refuse") -> list:
     """The edit that brings ``ids`` and everything they need into ``doc``.
 
     ``doc`` is the target :class:`~py61850.scl.SclDocument` and ``source`` is
@@ -638,7 +636,7 @@ def import_lnode_types(doc, source, ids, on_conflict="refuse") -> List:
     source_pool = _pool(_root_of(source))
     target_pool = _pool(target_root)
 
-    edits: List = []
+    edits: list = []
     section = _section(target_root)
     if section is None:
         # A document with no DataTypeTemplates at all is valid SCL -- an SSD
@@ -664,7 +662,7 @@ def import_lnode_types(doc, source, ids, on_conflict="refuse") -> List:
     return edits
 
 
-def update_lnode_type(doc, source, id_, on_conflict="refuse") -> List:
+def update_lnode_type(doc, source, id_, on_conflict="refuse") -> list:
     """The edit that replaces ``doc``'s `LNodeType` ``id_`` with ``source``'s.
 
     The reference exports `updateLNodeType(lNodeType, targetDoc)` and
@@ -718,7 +716,10 @@ def update_lnode_type(doc, source, id_, on_conflict="refuse") -> List:
                frozenset())[key]:
         return []
 
-    section = _section(target_root)
+    # `key in target_pool` was checked above and `_pool` is built FROM the
+    # section, so a pool that holds the key has a section. The annotation is
+    # the only place that implication is written down.
+    section: ET.Element = _section(target_root)   # type: ignore[assignment]
     old = target_pool[key]
     siblings = list(section)
     at = siblings.index(old)
@@ -730,7 +731,7 @@ def update_lnode_type(doc, source, id_, on_conflict="refuse") -> List:
     reached = [k for k in _closure(source_pool, [key]) if k != key]
     plan = _plan(doc, source, [id_], on_conflict, frozenset({key}))
 
-    edits: List = [Remove(old)]
+    edits: list = [Remove(old)]
     node = copy.deepcopy(source_pool[key])
     node.set("id", id_)
     _repoint(node, "LNodeType", plan.ids)
@@ -785,7 +786,7 @@ def _linked(pool, excluded, instance_types) -> set:
     return linked
 
 
-def remove_data_type(doc, edit, force=False) -> List:
+def remove_data_type(doc, edit, force=False) -> list:
     """``edit`` expanded: the type, and what its removal leaves unreferenced.
 
     ``edit`` is a :class:`~py61850.scl.Remove` whose node is an `LNodeType`,
@@ -855,8 +856,12 @@ def remove_data_type(doc, edit, force=False) -> List:
     # Discovery order, so the pruned types read down the closure rather than
     # in dictionary order, and a reader can follow what stranded what.
     order = {k: i for i, k in enumerate(pool)}
+    # `removed - {key}` is drawn entirely from `pool`, so both the lookup and
+    # the ranking below are total. Only `key` itself can carry a `None` id --
+    # an element with no `id` is schema-invalid -- and it is the one subtracted.
+    pruned: set[tuple[str, str]] = removed - {key}   # type: ignore[assignment]
     return [edit] + [Remove(pool[other])
-                     for other in sorted(removed - {key}, key=order.get)]
+                     for other in sorted(pruned, key=lambda k: order[k])]
 
 
 def _referrers(pool, key, instance_types) -> str:

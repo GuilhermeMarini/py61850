@@ -12,10 +12,12 @@ functions over strings."""
 import unittest
 
 from py61850 import folder_of
-from py61850.mms.services.files import (
-    basename, compile_file_filter, looks_like_directory,
-)
 from py61850.mms.pdu import DirEntry
+from py61850.mms.services.files import (
+    basename,
+    compile_file_filter,
+    looks_like_directory,
+)
 
 
 class TestNameHelpers(unittest.TestCase):

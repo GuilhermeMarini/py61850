@@ -13,8 +13,6 @@ tree. An IED's IP address and a GOOSE control block's MAC/APPID/VLAN are the
 two things a commissioning tool asks first, and neither needs the type pool.
 """
 
-from __future__ import annotations
-
 from .document import children_local, iter_local, privates_of
 
 
@@ -139,7 +137,7 @@ class Communication:
     __slots__ = ("subnetworks",)
 
     def __init__(self, root):
-        self.subnetworks = []
+        self.subnetworks: list[SubNetwork] = []
         # DIRECT CHILD of the root only. `<Communication>` is schema-valid
         # only there; a descendant scan would also match a same-named element
         # a vendor `Private` block happens to nest -- see `_ied_elements`'s

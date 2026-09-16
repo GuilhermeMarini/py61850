@@ -54,10 +54,8 @@ without rebuilding. Do not add elements to the tree by hand and then insert
 them through an edit.
 """
 
-from __future__ import annotations
-
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Union
 from xml.etree import ElementTree as ET
 
 from ..errors import SclError
@@ -101,7 +99,7 @@ class Insert:
 
     parent: ET.Element
     node: ET.Element
-    reference: Optional[ET.Element]
+    reference: ET.Element | None
 
 
 @dataclass(frozen=True)
@@ -145,7 +143,7 @@ class SetAttributes:
     __slots__ = ("element", "attributes")
 
     element: ET.Element
-    attributes: Mapping[str, Optional[str]]
+    attributes: Mapping[str, str | None]
 
     def __post_init__(self) -> None:
         # Copied, so an edit is a value: a caller that keeps mutating the dict
@@ -174,10 +172,10 @@ class SetTextContent:
     __slots__ = ("element", "text")
 
     element: ET.Element
-    text: Optional[str]
+    text: str | None
 
 
-Edit = Union[Insert, Remove, SetAttributes, SetTextContent, list, tuple]
+Edit = Insert | Remove | SetAttributes | SetTextContent | list | tuple
 
 _PRIMITIVES = (Insert, Remove, SetAttributes, SetTextContent)
 
@@ -188,11 +186,11 @@ _MISSING = object()
 
 # -- the parent map ---------------------------------------------------------
 
-def _build(root: ET.Element) -> Dict[ET.Element, ET.Element]:
+def _build(root: ET.Element) -> dict[ET.Element, ET.Element]:
     return {child: el for el in root.iter() for child in el}
 
 
-def _map(doc) -> Dict[ET.Element, ET.Element]:
+def _map(doc) -> dict[ET.Element, ET.Element]:
     m = doc._cache.get("parents")
     if m is None:
         m = doc._cache["parents"] = _build(doc.root)
@@ -221,7 +219,7 @@ def _parent(doc, node, rebuild: bool = True):
     return _MISSING
 
 
-def parent_of(doc, element: ET.Element) -> Optional[ET.Element]:
+def parent_of(doc, element: ET.Element) -> ET.Element | None:
     """``element``'s parent in ``doc``, or ``None``.
 
     ``None`` means the root element or an element this document does not
@@ -349,7 +347,7 @@ def _index(parent: ET.Element, child: ET.Element) -> int:
     return -1
 
 
-def _next_sibling(parent: ET.Element, child: ET.Element) -> Optional[ET.Element]:
+def _next_sibling(parent: ET.Element, child: ET.Element) -> ET.Element | None:
     i = _index(parent, child)
     return parent[i + 1] if 0 <= i < len(parent) - 1 else None
 
@@ -449,7 +447,7 @@ def apply_edit(doc, edit: Edit) -> Edit:
 
 def _apply(doc, edit):
     if isinstance(edit, (list, tuple)):
-        inverses: List[Edit] = []
+        inverses: list[Edit] = []
         for e in edit:
             try:
                 inverses.append(_apply(doc, e))
@@ -570,7 +568,7 @@ def _set_attributes(doc, edit: SetAttributes) -> Edit:
         # would carry the EDIT's order and undo into it. Values right, file
         # different, which is the failure Q13 exists for, one layer down.
         # The invertibility property test found it on five seeds out of five.
-        previous: Dict[str, Optional[str]] = dict(attrib)
+        previous: dict[str, str | None] = dict(attrib)
         for name in adds:
             previous[name] = None
     else:

@@ -13,8 +13,6 @@ travel together, a control block says how and when they are published, and an
 ``ExtRef`` says who is listening.
 """
 
-from __future__ import annotations
-
 from ..core.refs import ln_name as _ln_name
 from ..core.refs import mms_item as _mms_item
 from .document import children_local, privates_of
@@ -218,14 +216,14 @@ class ExtRef:
         return f"<ExtRef source={self.source_key!r} intAddr={self.int_addr!r}>"
 
 
-def data_sets_of(node) -> dict:
+def data_sets_of(node) -> dict[str, DataSet]:
     return {ds.name: ds for ds in
             (DataSet(el, node) for el in children_local(node.element, "DataSet"))
             if ds.name}
 
 
-def control_blocks_of(node) -> dict:
-    out = {}
+def control_blocks_of(node) -> dict[str, ControlBlock]:
+    out: dict[str, ControlBlock] = {}
     for kind in CONTROL_BLOCK_TAGS:
         for el in children_local(node.element, kind):
             cb = ControlBlock(kind, el, node)
@@ -239,8 +237,8 @@ def setting_control_of(node):
     return SettingControl(el) if el is not None else None
 
 
-def ext_refs_of(node) -> list:
-    out = []
+def ext_refs_of(node) -> list[ExtRef]:
+    out: list[ExtRef] = []
     for inputs in children_local(node.element, "Inputs"):
         out.extend(ExtRef(el, node) for el in children_local(inputs, "ExtRef"))
     return out

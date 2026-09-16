@@ -21,8 +21,6 @@ The pool answers what the file *declares*. Whether a particular instance
 overrides a value is the instance model's business, not this module's.
 """
 
-from __future__ import annotations
-
 from .document import children_local, privates_of
 
 # A DAType that references itself, directly or through a cycle, is malformed

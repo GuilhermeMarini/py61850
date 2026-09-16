@@ -83,7 +83,7 @@ class Schema:
         self.types = {}
         self.elements = {}          # name -> type name, or an inline complexType
         self.version = None
-        for name, data in sorted(sources.items()):
+        for _name, data in sorted(sources.items()):
             root = ET.fromstring(data)
             if self.version is None and root.get("version"):
                 self.version = root.get("version")
@@ -296,7 +296,9 @@ def main(argv=None):
 
 def _first_difference(left, right):
     a, b = left.splitlines(), right.splitlines()
-    for i, (x, y) in enumerate(zip(a, b)):
+    # The two files are free to differ in length -- that is what is being
+    # reported -- so this zip truncates rather than raising.
+    for i, (x, y) in enumerate(zip(a, b, strict=False)):
         if x != y:
             return [f"  line {i + 1}", f"    committed: {x}", f"    schema   : {y}"]
     return [f"  {len(a)} lines committed, {len(b)} generated"]

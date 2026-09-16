@@ -123,8 +123,7 @@ class TestDerivedTables(unittest.TestCase):
         # It moved to `generator.py` and `supervision.py` re-exports it. The
         # value and every allocation made from it are unchanged, which is what
         # keeps this a MINOR change under A18's rule.
-        from py61850.scl import supervision
-        from py61850.scl import generator
+        from py61850.scl import generator, supervision
         self.assertIs(supervision.LN_INST_RANGE, generator.LN_INST_RANGE)
 
 
@@ -627,8 +626,11 @@ class TestNothingIsApplied(_Base):
         # being deleted: what used to assert a refusal naming A17 now asserts
         # that the allocator is reached and that the reference's prefix is
         # what comes out.
-        from py61850.scl import (create_data_set, create_report_control,
-                                 create_sampled_value_control)
+        from py61850.scl import (
+            create_data_set,
+            create_report_control,
+            create_sampled_value_control,
+        )
         doc = self.doc(name="now_allocate.scd")
         for function, tag in ((create_data_set, "DataSet"),
                               (create_report_control, "ReportControl"),

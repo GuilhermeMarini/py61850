@@ -25,7 +25,7 @@ Keeping the pair in one file is what keeps them symmetrical -- every
 import struct
 
 from . import ber
-from .time import decode_utc_time, encode_utc_time, decode_binary_time
+from .time import decode_binary_time, decode_utc_time, encode_utc_time
 
 # Data CHOICE tags (context-specific; array/structure are constructed)
 ARRAY = 0xA1

@@ -60,7 +60,6 @@ and before the first element of a later one.
   arise there at all. See Q18.
 """
 
-from typing import Optional
 from xml.etree import ElementTree as ET
 
 from ._content_models import CONTENT_MODELS
@@ -79,7 +78,7 @@ _RANKS = {
 }
 
 
-def _local(tag) -> Optional[str]:
+def _local(tag) -> str | None:
     """The local name of ``tag``, or ``None`` for a comment or a PI."""
     if not isinstance(tag, str):
         return None
@@ -92,7 +91,7 @@ def _namespace(tag) -> str:
     return tag[1:tag.index("}")]
 
 
-def _rank(ranks, tag, parent_namespace) -> Optional[int]:
+def _rank(ranks, tag, parent_namespace) -> int | None:
     """``tag``'s slot in ``ranks``, or ``None`` if the model does not place it.
 
     A child in a different namespace from its parent is foreign content, and
@@ -149,7 +148,7 @@ def may_contain(parent_tag, child_tag) -> bool:
     return bool(ANY in ranks and child_ns and child_ns != _namespace(parent_tag))
 
 
-def reference_for(parent: ET.Element, tag) -> Optional[ET.Element]:
+def reference_for(parent: ET.Element, tag) -> ET.Element | None:
     """The child of ``parent`` that a new ``tag`` should be inserted before.
 
     ``None`` means append, which is also the answer for a parent the table

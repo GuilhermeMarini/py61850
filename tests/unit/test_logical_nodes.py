@@ -13,7 +13,9 @@ import unittest
 
 from py61850 import LogicalNode
 from py61850.mms.services.directory import (
-    compile_ln_filter, logical_nodes_from_names, parse_ln_name,
+    compile_ln_filter,
+    logical_nodes_from_names,
+    parse_ln_name,
 )
 
 

@@ -20,7 +20,7 @@ socket error escape.
 
 import sys
 
-from py61850 import MmsClient, Iec61850Error, TransportError, MmsError
+from py61850 import Iec61850Error, MmsClient, MmsError, TransportError
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "192.0.2.22"
 

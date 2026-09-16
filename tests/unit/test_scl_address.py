@@ -29,13 +29,13 @@ from py61850.scl import (
     change_gse_or_smv_address,
     change_smv_content,
     connected_ap_for,
+    control_block_gse_or_smv,
     create_gse,
     create_smv,
     iter_local,
     reference_for,
     strip_ns,
 )
-from py61850.scl import control_block_gse_or_smv
 from py61850.scl.address import P_TYPES, XSI_TYPE
 from tests.unit import roundtrip
 from tests.unit import scl_fixtures as fx

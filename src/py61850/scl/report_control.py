@@ -134,18 +134,16 @@ returns live ELEMENTS, so a caller working in elements is never stale. Q14 is
 still A13's to answer; this module only adds two more shapes to it.
 """
 
-from __future__ import annotations
-
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from .control_block import _is_control_block, update_dat_set
 from .controls import CONTROL_BLOCK_TAGS
 from .data_set import _limit, _namespace, _same_ns_children, _services_child
 from .document import strip_ns
-from .generator import _allocated_name
 from .edit import EditRejected, Insert, SetAttributes
 from .extref import _qualify, _same
+from .generator import _allocated_name
 from .ordering import may_contain, reference_for
 
 #: The elements 61850-6 lets a `ReportControl` hang off. `tLN0` and `tLN` both
@@ -178,8 +176,8 @@ class MaxReportControl(NamedTuple):
     and one convention across the two phases is worth the divergence. See Q29.
     """
 
-    max: Optional[int]
-    max_buf: Optional[int]
+    max: int | None
+    max_buf: int | None
     scope: str
 
 
@@ -203,7 +201,7 @@ class ReportControlInstances(NamedTuple):
 
 # -- queries ----------------------------------------------------------------
 
-def max_report_control(doc, element) -> Optional[MaxReportControl]:
+def max_report_control(doc, element) -> MaxReportControl | None:
     """What `Services/ConfReportControl` allows for ``element``'s scope.
 
     ``element`` is anything inside -- or being added to -- an `IED`: a logical
@@ -345,7 +343,7 @@ def create_report_control(doc, parent, name=None, desc=None, dat_set=None,
                           rpt_id=None, conf_rev="1", buffered=None,
                           buf_time=None, indexed=None, intg_pd=None,
                           trg_ops=None, opt_fields=None, instances=None,
-                          force=False, taken=()) -> List:
+                          force=False, taken=()) -> list:
     """The edit that adds a new `ReportControl`, with its required `OptFields`.
 
     ``parent`` is an `LN` or `LN0`, or an `LDevice`, `AccessPoint` or `IED`
@@ -408,9 +406,12 @@ def create_report_control(doc, parent, name=None, desc=None, dat_set=None,
             f"datSet is an xs:keyref and resolves in the logical node")
     is_buffered = buffered == "true"
     if not force and not can_add_report_control(doc, node, buffered=is_buffered):
-        limit = max_report_control(doc, node)
+        # Both of these are non-None for one reason:
+        # `can_add_report_control` returned False, and it returns False only
+        # when a ConfReportControl was found and its maximum reached.
+        limit: MaxReportControl = max_report_control(doc, node)   # type: ignore[assignment]
         counted = number_report_control_instances(
-            _services_child(doc, node, "ConfReportControl")[2])
+            _services_child(doc, node, "ConfReportControl")[2])   # type: ignore[index]
         raise EditRejected(
             f"this {limit.scope} already holds {counted.total} ReportControl "
             f"elements ({counted.buffered} buffered), which is the maximum "
@@ -444,7 +445,7 @@ def create_report_control(doc, parent, name=None, desc=None, dat_set=None,
 
 # -- edit checks ------------------------------------------------------------
 
-def update_report_control(doc, edit, ignore_supervision=True) -> List:
+def update_report_control(doc, edit, ignore_supervision=True) -> list:
     """``edit`` corrected: the dataset, the revision, and every subscriber.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on a `ReportControl`.
@@ -488,13 +489,13 @@ def update_report_control(doc, edit, ignore_supervision=True) -> List:
             f"{strip_ns(control.tag) if isinstance(control, ET.Element) else type(control).__name__}"
             f" is not a ReportControl")
 
-    edits: List = list(update_dat_set(doc, edit))
+    edits: list = list(update_dat_set(doc, edit))
     edits.extend(_rename_edits(doc, control, edit))
     edits.extend(_indexed_edits(control, edit))
     return edits
 
 
-def _rename_edits(doc, control, edit) -> List:
+def _rename_edits(doc, control, edit) -> list:
     """`srcCBName` re-pointed on every subscriber, when `name` changes."""
     if "name" not in edit.attributes:
         return []
@@ -520,7 +521,7 @@ def _rename_edits(doc, control, edit) -> List:
             for ext_ref in find_control_block_subscription(doc, control)]
 
 
-def _indexed_edits(control, edit) -> List:
+def _indexed_edits(control, edit) -> list:
     """`RptEnabled@max` reset to 1 when `indexed` is turned off."""
     if edit.attributes.get("indexed") != "false":
         return []
