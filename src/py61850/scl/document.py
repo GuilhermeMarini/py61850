@@ -26,8 +26,6 @@ Ed2.1's ``6-100`` namespace in one), and matching on a fully-qualified tag
 would silently return nothing for either.
 """
 
-from __future__ import annotations
-
 import codecs
 import contextlib
 import io
@@ -37,7 +35,7 @@ import re
 import tempfile
 import threading
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Self
 from xml.etree import ElementTree as ET
 
 from . import edit as _edit
@@ -201,13 +199,15 @@ class SclDocument:
         # One object rather than five attributes because it is one thing, and
         # because :meth:`to_bytes` consumes all five together.
         self._layout = layout if layout is not None else _SourceLayout()
-        self._header = False        # sentinel: not looked up yet
+        # Three states, which is why it is not simply `Header | None`:
+        # `False` means not looked up yet, `None` means the file has none.
+        self._header: Header | bool | None = False
         self._cache: dict = {}
 
     # -- constructors -------------------------------------------------------
 
     @classmethod
-    def parse(cls, path) -> "SclDocument":
+    def parse(cls, path) -> Self:
         """The document, raising on any failure.
 
         ``OSError`` for a file that cannot be read, ``ET.ParseError`` for XML
@@ -597,7 +597,7 @@ _NS_LOCK = threading.RLock()
 # stdlib does anyway. Losing the containment is a worse outcome than the
 # prefixes coming back as `ns0:`, so a `_NS_MAP` of `None` is logged where it
 # matters rather than passed over in silence.
-_NS_MAP = getattr(ET, "_namespace_map", None)
+_NS_MAP: dict[str, str] | None = getattr(ET, "_namespace_map", None)
 
 # The prefix format `ElementTree` invents for itself, and the one
 # `register_namespace` refuses. See `_document_prefixes`.
@@ -730,7 +730,10 @@ def _document_prefixes(root: ET.Element, declarations):
         finally:
             for name in added:
                 del root.attrib[name]
-            if snapshot is not None:
+            # `_NS_MAP is not None` is implied by `snapshot is not None` --
+            # the snapshot was taken from it and it is never reassigned --
+            # but the implication lives in two statements 40 lines apart.
+            if snapshot is not None and _NS_MAP is not None:
                 _NS_MAP.clear()
                 _NS_MAP.update(snapshot)
 

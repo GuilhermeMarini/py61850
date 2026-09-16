@@ -24,8 +24,6 @@ reader builds these names from a file, and an MMS client parses them back out
 of ``GetNameList``.
 """
 
-from __future__ import annotations
-
 
 def ld_name(ied_name: str, ld_inst: str, ld_name_attr=None) -> str:
     """The MMS domain of one LDevice.

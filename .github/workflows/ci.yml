@@ -65,6 +65,37 @@ jobs:
       - name: Public API imports clean
         run: python -c "import py61850 as m; print(m.__version__, m.__all__)"
 
+  lint:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # DEVELOPMENT dependencies, pinned here and deliberately NOT declared in
+      # `[project.optional-dependencies]`. `importlib.metadata.requires()`
+      # returns extras WITH their markers, so a `dev` extra would appear in the
+      # list the "Assert zero runtime dependencies" step above asserts is empty
+      # -- the tooling adopted to raise the standard would break the check that
+      # defines the package. The pins are exact so a new ruff release cannot
+      # fail an unrelated pull request.
+      - name: Install the tooling
+        run: python -m pip install ruff==0.16.7 mypy==2.3.1
+
+      # One job, not five matrix rows: neither tool's answer varies by OS or by
+      # interpreter -- `ruff.toml` fixes `target-version` and `mypy.ini` fixes
+      # `python_version`, both at the declared 3.13 floor.
+      - name: Lint
+        run: python -m ruff check .
+
+      # No arguments: the file set is `mypy.ini`, which scopes this to `scl/`
+      # for the measured reason recorded there.
+      - name: Type-check
+        run: python -m mypy
+
   build:
     name: Build & verify distributions
     runs-on: ubuntu-latest

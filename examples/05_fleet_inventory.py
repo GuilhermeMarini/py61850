@@ -19,7 +19,7 @@ built on this library wants.
 import csv
 import sys
 
-from py61850 import MmsClient, Iec61850Error
+from py61850 import Iec61850Error, MmsClient
 
 HOSTS = sys.argv[1:] or ["192.0.2.22"]
 OUT = "inventory.csv"

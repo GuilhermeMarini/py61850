@@ -338,7 +338,9 @@ def main(argv=None):
 
 def _first_difference(left, right):
     a, b = left.splitlines(), right.splitlines()
-    for i, (x, y) in enumerate(zip(a, b)):
+    # The two files are free to differ in length -- that is what is being
+    # reported -- so this zip truncates rather than raising.
+    for i, (x, y) in enumerate(zip(a, b, strict=False)):
         if x != y:
             return [f"  line {i + 1}", f"    committed: {x}", f"    namespace: {y}"]
     return [f"  {len(a)} lines committed, {len(b)} generated"]

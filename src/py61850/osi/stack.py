@@ -20,8 +20,8 @@ carry is built in :mod:`py61850.mms.pdu`, so an MMS server can reuse this same
 module to unwrap requests and wrap responses.
 """
 
-from . import acse, presentation, session
 from ..errors import TransportError
+from . import acse, presentation, session
 
 MMS_CONTEXT_ID = presentation.CTX_MMS
 

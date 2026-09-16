@@ -150,10 +150,10 @@ class TestDeclarationsSurvive(_Base):
         """
         esel = _root([("", SCL), ("esel", SEL)],
                      '<Substation name="S1"><Private type="t" '
-                     'xmlns:esel="%s"><esel:x/></Private></Substation>' % SEL)
+                     f'xmlns:esel="{SEL}"><esel:x/></Private></Substation>')
         sel = _root([("", SCL), ("sel", SEL)],
                     '<Substation name="S1"><Private type="t" '
-                    'xmlns:sel="%s"><sel:x/></Private></Substation>' % SEL)
+                    f'xmlns:sel="{SEL}"><sel:x/></Private></Substation>')
         first = self.out(esel)
         self.assertIn("<sel:x", self.out(sel))
         self.assertEqual(first, self.out(esel))
@@ -212,8 +212,8 @@ class TestOneDocumentDoesNotChangeAnother(_Base):
         """
         self.out(_root([("", SCL), ("esel", SEL)],
                        '<Substation name="S1"><Private type="t" '
-                       'xmlns:esel="%s"><esel:x/></Private></Substation>' % SEL))
-        undeclared = ET.Element("{%s}Private" % SEL)
+                       f'xmlns:esel="{SEL}"><esel:x/></Private></Substation>'))
+        undeclared = ET.Element("{%s}Private" % SEL)  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
         self.assertNotIn(b"esel", ET.tostring(undeclared))
 
     def test_the_registry_is_exactly_what_it_was(self):
@@ -236,9 +236,9 @@ class TestOneDocumentDoesNotChangeAnother(_Base):
         see. `ns0:` is the RIGHT answer for a bare `ElementTree` -- nothing
         registered anything -- and it has to stay the answer.
         """
-        plain = ET.tostring(ET.Element("{%s}SCL" % SCL))
+        plain = ET.tostring(ET.Element("{%s}SCL" % SCL))  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
         self.out(_root([("", SCL)], '<Substation name="S1"/>'))
-        self.assertEqual(plain, ET.tostring(ET.Element("{%s}SCL" % SCL)))
+        self.assertEqual(plain, ET.tostring(ET.Element("{%s}SCL" % SCL)))  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
         self.assertIn(b"ns0", plain)
 
 
@@ -260,7 +260,7 @@ class TestTheRefusedShapes(_Base):
         """
         out = self.out(_root([("", SCL), ("ns0", SEL)],
                              '<Substation name="S1"><Private type="t" '
-                             'xmlns:ns0="%s"><ns0:x/></Private></Substation>' % SEL))
+                             f'xmlns:ns0="{SEL}"><ns0:x/></Private></Substation>'))
         self.assertEqual(1, out.count("<SCL "))
         ET.fromstring(out)      # the point: still parseable
 
@@ -273,7 +273,7 @@ class TestTheRefusedShapes(_Base):
         """
         out = self.out(_root(
             [("", SCL), ("xsi", "urn:not-schema-instance")],
-            '<Substation name="S1" xsi:nil="true" xmlns:xsi="%s"/>' % XSI))
+            f'<Substation name="S1" xsi:nil="true" xmlns:xsi="{XSI}"/>'))
         self.assertEqual(1, out.count("xmlns:xsi="))
         self.assertIn(XSI, out)
         ET.fromstring(out)
@@ -287,7 +287,7 @@ class TestTheRefusedShapes(_Base):
         """
         out = self.out(_root([("", SCL), ("a", SEL), ("b", SEL)],
                              '<Substation name="S1"><Private type="t" '
-                             'xmlns:a="%s"><a:x/></Private></Substation>' % SEL))
+                             f'xmlns:a="{SEL}"><a:x/></Private></Substation>'))
         self.assertIn(f'xmlns:a="{SEL}"', out)
         self.assertIn(f'xmlns:b="{SEL}"', out)
         self.assertIn("<a:x", out)
@@ -325,8 +325,8 @@ class TestTheUsedScanner(unittest.TestCase):
     """`_used_namespace_uris`: what the serialiser will declare on its own."""
 
     def test_a_tag_and_an_attribute_name_both_count(self):
-        root = ET.Element("{%s}SCL" % SCL)
-        ET.SubElement(root, "Substation", {"{%s}x" % SXY: "1"})
+        root = ET.Element("{%s}SCL" % SCL)  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
+        ET.SubElement(root, "Substation", {"{%s}x" % SXY: "1"})  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
         self.assertEqual({SCL, SXY}, doc_mod._used_namespace_uris(root))
 
     def test_a_comment_node_is_not_an_error(self):
@@ -337,7 +337,7 @@ class TestTheUsedScanner(unittest.TestCase):
         after that has to tolerate one -- including this walk, which is newer
         than the guard and does not go through `strip_ns`.
         """
-        root = ET.Element("{%s}SCL" % SCL)
+        root = ET.Element("{%s}SCL" % SCL)  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
         root.append(ET.Comment(" a note "))
         self.assertEqual({SCL}, doc_mod._used_namespace_uris(root))
 

@@ -11,6 +11,73 @@ that was written at the time.
 
 ---
 
+## Unreleased
+
+**`ruff` and `mypy` are now part of the gate.** Nothing a caller can observe
+changes: no name added or removed, no signature moved, no behaviour different.
+It is recorded because the standard a library is held to is part of what the
+library is — and because the last section below is a defect that was caught
+rather than shipped.
+
+`ruff` runs over the whole repository with `E, F, W, I, UP, B` at
+`target-version = "py313"`; `mypy` runs over `src/py61850/scl` with the flags
+`pac-ct` uses. Both are **development** dependencies, pinned in the workflow and
+deliberately absent from the package metadata: `importlib.metadata.requires()`
+reports extras with their markers, so a `dev` extra would show up in the list CI
+asserts is empty. `pip install py61850` still pulls nothing.
+
+**263 findings closed, the large majority mechanically.** `ruff check --fix`
+closed 239 of them (the running total rises to 275, because fixing one finding
+exposes another), and 36 were closed by hand. `UP` was affordable only because
+0.5.0 raised the floor: 189 of the 214 findings in `src/` are auto-fixable at
+3.13, against 16 at the old `>=3.9`. `from __future__ import annotations` is
+gone from the 20 modules that carried it, and the `typing.List` / `Optional` /
+`Tuple` imports with them.
+
+**26 `mypy` findings, and not one of them was a bug.** That is worth saying
+plainly, because the case for a type checker is usually a case about defects and
+this is not one. **Fourteen of the 26 are a guard silently encoding an invariant
+about another function's return type** — `can_add_report_control` returning
+`False` implies a `ConfReportControl` exists, which was true, load-bearing and
+written nowhere. The annotations that close them are the point of the exercise.
+Eight sites carry `# type: ignore` with the reason on the line above; two of
+those are the `try`/`except ImportError` fallback for the optional generated
+table, a shape `mypy` cannot express at all.
+
+**Two changes that are not merely cosmetic, both behaviour-preserving:**
+
+- `zip()` now states `strict=` at every call. Three say `strict=True`, where a
+  guard on the line above already forces equal lengths and the parameter simply
+  writes that guard down. Seven say `strict=False`, where unequal lengths are
+  the point — `zip(ranks, ranks[1:])` is the pairwise idiom, and `strict=True`
+  would raise on every call.
+- `SclDocument.parse` is annotated `-> Self` instead of `-> SclDocument`. It
+  ends in `return cls(...)`, so `Self` is the more accurate of the two — and it
+  was the one forward reference in the package, which is the next section.
+
+### The future-import deletion was verified for 3.13, not only for 3.14
+
+Deleting `from __future__ import annotations` makes annotations evaluate at
+definition time again. **On Python 3.14 it does not**, because PEP 649 makes
+them lazy by default — so a tree stripped of those imports can import cleanly,
+pass its whole suite on 3.14, and still raise `NameError` at import on the 3.13
+floor this package declares.
+
+The check that matters is therefore not that the package imports. Every one of
+the **712 annotation scopes** across its 57 modules was evaluated eagerly, and
+**one genuine forward reference turned up**: `SclDocument.parse`, whose return
+annotation named the class being defined. On 3.13 that is an import-time
+`NameError` in the package's central module. It is the `-> Self` change above.
+
+### Verification
+
+1,411 tests, unchanged and all passing, on Python 3.14.6 against the editable
+tree. `ruff check .` and `python -m mypy` both clean. `pac-ct`'s 942 tests pass
+against this tree, which is the seam nothing in CI checks. `py61850` still has
+**zero runtime dependencies**, which CI asserts on every run.
+
+---
+
 ## 0.5.0 — 2026-09-15
 
 **`py61850.scl` can now CHANGE an SCL document, not only read one and write it

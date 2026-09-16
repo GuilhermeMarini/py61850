@@ -218,10 +218,8 @@ spend the same last place under a `Services` limit. 8 of the corpus's 59
 keeps `created_inputs` for the identical hazard one level down. Q33.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from .control_block import (
@@ -289,8 +287,8 @@ class MaxSupervision(NamedTuple):
     sentinel applies unchanged.
     """
 
-    max_go: Optional[int]
-    max_sv: Optional[int]
+    max_go: int | None
+    max_sv: int | None
     scope: str
 
 
@@ -362,7 +360,7 @@ def _ancestor(doc, element, local_name):
     return None
 
 
-def supervision_ln_class(control_block) -> Optional[str]:
+def supervision_ln_class(control_block) -> str | None:
     """``"LGOS"``, ``"LSVS"``, or ``None`` -- the class that supervises this
     control block.
 
@@ -382,7 +380,7 @@ def _is_supervision_ln(element) -> bool:
             and element.get("lnClass") in SUPERVISION_LN_CLASSES)
 
 
-def _supervision_lns(doc, ied, ln_class=None) -> List[ET.Element]:
+def _supervision_lns(doc, ied, ln_class=None) -> list[ET.Element]:
     """Every supervision logical node inside ``ied``, in document order."""
     out = []
     for node in _own(ied, "LN"):
@@ -461,7 +459,7 @@ def _supervision_values(doc, do_names=SUPERVISION_REFERENCE_DOS):
                         yield val, (val.text or "").strip()
 
 
-def _retext(element, text: Optional[str]) -> SetTextContent:
+def _retext(element, text: str | None) -> SetTextContent:
     """A :class:`~py61850.scl.SetTextContent` that keeps the element's own
     leading and trailing whitespace.
 
@@ -575,7 +573,7 @@ def is_src_ref_editable(doc, supervision_ln) -> bool:
 
 # -- the Services limit -----------------------------------------------------
 
-def max_supervision(doc, element) -> Optional[MaxSupervision]:
+def max_supervision(doc, element) -> MaxSupervision | None:
     """How many subscriptions the IED holding ``element`` may supervise.
 
     ``element`` is an `IED`, an `AccessPoint` or anything inside one. The
@@ -623,10 +621,10 @@ class _Plan(NamedTuple):
 
     ln_class: str
     obj_ref: str
-    supervision_ln: Optional[ET.Element]   # the node to reuse, or None
-    parent: Optional[ET.Element]           # the LDevice a new node goes in
-    ln_type: Optional[str]
-    inst: Optional[str]
+    supervision_ln: ET.Element | None   # the node to reuse, or None
+    parent: ET.Element | None           # the LDevice a new node goes in
+    ln_type: str | None
+    inst: str | None
 
 
 class _Batch:
@@ -999,7 +997,7 @@ def instantiate_supervision(doc, supervision, supervision_ln=None,
                             ln_type=None, parent=None,
                             check_editable_src_ref=True,
                             check_duplicate_supervisions=True,
-                            check_max_supervision_limits=True) -> List:
+                            check_max_supervision_limits=True) -> list:
     """The edit that makes ``supervision.subscriber`` watch
     ``supervision.control_block``, as one compound edit.
 
@@ -1032,7 +1030,7 @@ def instantiate_supervision(doc, supervision, supervision_ln=None,
     return _instantiate_edits(doc, plan)
 
 
-def _instantiate_edits(doc, plan) -> List:
+def _instantiate_edits(doc, plan) -> list:
     """The edits a resolved :class:`_Plan` turns into.
 
     Split from :func:`instantiate_supervision` so the wiring in
@@ -1161,7 +1159,7 @@ def _removal_target(doc, supervision_ln, check_subscription):
 
 
 def remove_supervision(doc, supervision_ln, remove_supervision_ln=False,
-                       check_subscription=True) -> List:
+                       check_subscription=True) -> list:
     """The edit that stops ``supervision_ln`` watching anything.
 
     **The value is blanked and the logical node is kept**, which is what
@@ -1216,7 +1214,7 @@ def _source_key(ext_ref):
             ext_ref.get("srcLNInst"), ext_ref.get("srcCBName"))
 
 
-def _expand_subscribe_supervision(doc, connections, new_supervision_ln) -> List:
+def _expand_subscribe_supervision(doc, connections, new_supervision_ln) -> list:
     """The supervision each connection implies, as edits.
 
     Reached by :func:`~py61850.scl.subscribe` when `ignore_supervision` is
@@ -1242,7 +1240,7 @@ def _expand_subscribe_supervision(doc, connections, new_supervision_ln) -> List:
       `importLNodeType` can supply. Q32 and Q33.
     """
     batch = _Batch()
-    edits: List = []
+    edits: list = []
     seen = set()
     for connection in connections:
         block = getattr(connection, "control_block", None)
@@ -1280,7 +1278,7 @@ def _expand_subscribe_supervision(doc, connections, new_supervision_ln) -> List:
     return edits
 
 
-def _expand_unsubscribe_supervision(doc, ext_refs) -> List:
+def _expand_unsubscribe_supervision(doc, ext_refs) -> list:
     """The supervision the removal of these `ExtRef` elements ends, as edits.
 
     Reached by :func:`~py61850.scl.unsubscribe` when `ignore_supervision` is
@@ -1322,7 +1320,7 @@ def _expand_unsubscribe_supervision(doc, ext_refs) -> List:
         if ext_ref.get("srcCBName"):
             groups.setdefault(_source_key(ext_ref), []).append(ext_ref)
 
-    edits: List = []
+    edits: list = []
     done = set()
     handled = set()
     for group in groups.values():
@@ -1365,7 +1363,7 @@ def _expand_unsubscribe_supervision(doc, ext_refs) -> List:
     return edits
 
 
-def _expand_control_block_supervision(doc, control_block) -> List:
+def _expand_control_block_supervision(doc, control_block) -> list:
     """Every supervision value naming ``control_block``, blanked.
 
     Reached by :func:`~py61850.scl.remove_control_block` when
@@ -1399,7 +1397,7 @@ def _expand_control_block_supervision(doc, control_block) -> List:
             if text == obj_ref]
 
 
-def _repoint_supervision(doc, control_block, new_name) -> List:
+def _repoint_supervision(doc, control_block, new_name) -> list:
     """Every supervision value naming ``control_block``, re-pointed at its new
     name.
 

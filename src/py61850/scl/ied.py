@@ -276,10 +276,7 @@ stops being tolerable** -- :func:`remove_ied` removes the very element
 invalidates by ancestry, and the reasoning is in Q14 and in `edit.py`.
 """
 
-from __future__ import annotations
-
 import copy
-from typing import Dict, List, Optional
 from xml.etree import ElementTree as ET
 
 from .control_block import _logical_node, _placement
@@ -290,8 +287,6 @@ from .edit import EditRejected, Insert, Remove, SetAttributes, SetTextContent
 from .extref import unsubscribe
 from .ordering import reference_for
 from .supervision import (
-    SUPERVISION_LN_CLASSES,
-    SUPERVISION_REFERENCE_DOS,
     _retext,
     _supervision_values,
 )
@@ -402,7 +397,7 @@ def _object_reference(doc, element):
     return (f"{ied_name}{ld_inst}/{prefix}{ln_class}{ln_inst}.{name}", ied_name)
 
 
-def _object_reference_index(doc) -> Dict[str, Optional[str]]:
+def _object_reference_index(doc) -> dict[str, str | None]:
     """``{object reference: owning IED name}`` for every control block and
     `DataSet` in the document.
 
@@ -425,7 +420,7 @@ def _object_reference_index(doc) -> Dict[str, Optional[str]]:
     No corpus file contains either case: 758 of 758 supervision values resolve
     to exactly one owner.
     """
-    index: Dict[str, Optional[str]] = {}
+    index: dict[str, str | None] = {}
     names = CONTROL_BLOCK_TAGS + ("DataSet",)
     for local_name in names:
         for element in _own(doc, local_name):
@@ -442,7 +437,7 @@ def _object_reference_index(doc) -> Dict[str, Optional[str]]:
 
 # -- renaming ---------------------------------------------------------------
 
-def update_ied(doc, edit) -> List:
+def update_ied(doc, edit) -> list:
     """``edit`` expanded: the rename, and every reference that has to follow.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on an `IED` element. If
@@ -501,7 +496,7 @@ def update_ied(doc, edit) -> List:
             f"renaming IED {old_name!r} to {new_name!r} would collide with "
             f"the IED already named {new_name!r}")
 
-    edits: List = [edit]
+    edits: list = [edit]
     if not old_name:
         # Nothing can refer to an unnamed IED: `iedName` is `use="required"`
         # wherever it is not defaulted, and the one place it is defaulted
@@ -527,7 +522,7 @@ def update_ied(doc, edit) -> List:
 
 # -- removing ---------------------------------------------------------------
 
-def remove_ied(doc, edit) -> List:
+def remove_ied(doc, edit) -> list:
     """``edit`` expanded: the IED, and everything outside it that named it.
 
     ``edit`` is a :class:`~py61850.scl.Remove` whose node is an `IED`. What
@@ -565,7 +560,7 @@ def remove_ied(doc, edit) -> List:
             f"{_describe(ied)} is not an IED of this document; an IED is a "
             f"direct child of the SCL root in the document's own namespace")
 
-    edits: List = [edit]
+    edits: list = [edit]
     name = ied.get("name")
     if not name:
         # As in `update_ied`: nothing can name it, so the removal is complete
@@ -631,7 +626,7 @@ def _subnetworks(doc):
     return [child for child in section if child.tag == tag]
 
 
-def _ln_type_ids(doc, ied) -> List[str]:
+def _ln_type_ids(doc, ied) -> list[str]:
     """The `LNodeType` ids the `LN` and `LN0` elements inside ``ied`` name, in
     document order and without repeats.
 
@@ -650,7 +645,7 @@ def _ln_type_ids(doc, ied) -> List[str]:
     schema does not resolve against anything.
     """
     wanted = (_qualified(doc, "LN"), _qualified(doc, "LN0"))
-    out: List[str] = []
+    out: list[str] = []
     seen = set()
     for element in ied.iter():
         if element.tag not in wanted:
@@ -693,7 +688,7 @@ def _repoint_ln_type(doc, node, mapping) -> None:
             element.set("lnType", fresh)
 
 
-def _communication_edits(doc, source, names) -> List:
+def _communication_edits(doc, source, names) -> list:
     """The `ConnectedAP` subtrees of ``names``, copied into ``doc``.
 
     **A device is not one access point.** `mixed.scd` puts 12 of its 14 IEDs
@@ -727,7 +722,7 @@ def _communication_edits(doc, source, names) -> List:
     target_root = doc.root
     ap_tag = _qualified(source, "ConnectedAP")
 
-    edits: List = []
+    edits: list = []
     section = _communication(doc)
     if section is None:
         # A target with no Communication at all is ordinary -- an SSD
@@ -741,7 +736,7 @@ def _communication_edits(doc, source, names) -> List:
     taken = {(ap.get("iedName"), ap.get("apName"))
              for subnet in _subnetworks(doc) for ap in subnet
              if ap.tag == _qualified(doc, "ConnectedAP")}
-    created: Dict[Optional[str], ET.Element] = {}
+    created: dict[str | None, ET.Element] = {}
 
     for subnet in _subnetworks(source):
         for ap in subnet:
@@ -785,7 +780,7 @@ def _communication_edits(doc, source, names) -> List:
 
 
 def insert_ied(doc, source, names, on_conflict="refuse",
-               add_communication=False) -> List:
+               add_communication=False) -> list:
     """The edit that brings ``names`` from ``source`` into ``doc``.
 
     ``doc`` is the target :class:`~py61850.scl.SclDocument` and ``source`` is
@@ -909,7 +904,7 @@ def insert_ied(doc, source, names, on_conflict="refuse",
                 f"inserting with update_ied")
         incoming.append(element)
 
-    ids: List[str] = []
+    ids: list[str] = []
     known = set()
     for element in incoming:
         for id_ in _ln_type_ids(source, element):
@@ -925,7 +920,7 @@ def insert_ied(doc, source, names, on_conflict="refuse",
     plan = lnode_type_conflicts(doc, source, ids, on_conflict)
     type_edits = import_lnode_types(doc, source, ids, on_conflict)
 
-    edits: List = []
+    edits: list = []
     if add_communication:
         edits.extend(_communication_edits(doc, source, names))
 

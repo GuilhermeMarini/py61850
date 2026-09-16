@@ -299,9 +299,9 @@ class TestControlBlockGseOrSmv(_Base):
         `ConnectedAP`, and the address may be under either."""
         doc = self.doc(station(ap_body=""))
         subnet = next(iter_local(doc.root, "SubNetwork"))
-        second = ET.SubElement(subnet, "{%s}ConnectedAP" % fx.SCL_NS,
+        second = ET.SubElement(subnet, "{%s}ConnectedAP" % fx.SCL_NS,  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
                                {"iedName": "PUB", "apName": "S2"})
-        ET.SubElement(second, "{%s}GSE" % fx.SCL_NS,
+        ET.SubElement(second, "{%s}GSE" % fx.SCL_NS,  # noqa: UP031  (Clark notation -- an f-string would need triple braces)
                       {"ldInst": "CFG", "cbName": "GCB1"})
         address = control_block_gse_or_smv(doc, _named(doc, "GSEControl", "GCB1"))
         self.assertIsNotNone(address)

@@ -68,7 +68,6 @@ from py61850.scl import (
 from tests.unit import roundtrip
 from tests.unit import scl_fixtures as fx
 
-
 # Every element name the Substation section can hold -- the fifteen obvious
 # ones and the eight the brief for this phase did not list. All twenty-three
 # are checked against the corpus below.
@@ -926,8 +925,8 @@ def specified(ln_type="T_PTOC", second_ln_type="T_PTOC", spec=None,
         )
 
     def node(ln_inst, type_, body):
-        return ('<LNode lnClass="PTOC" lnInst="%s" lnType="%s">%s</LNode>'
-                % (ln_inst, type_, body))
+        return (f'<LNode lnClass="PTOC" lnInst="{ln_inst}" '
+                f'lnType="{type_}">{body}</LNode>')
 
     bay = fx.bay("B0", body=fx.substation_function("F1", body=(
         node("1", ln_type, fx.spec_private(spec))

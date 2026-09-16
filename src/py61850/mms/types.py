@@ -30,7 +30,7 @@ def decode_type_description(td_tag: int, td_value: bytes):
         comps = []
         for t, v in ber.iter_tlv(td_value):
             if t == 0xA1:                         # components [1]
-                for ct, cv in ber.iter_tlv(v):    # each: SEQUENCE 0x30
+                for _ct, cv in ber.iter_tlv(v):   # each: SEQUENCE 0x30
                     comps.append(_decode_component(cv))
         return {"structure": comps}
     if td_tag == 0xA1:                            # array

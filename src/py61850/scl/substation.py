@@ -331,9 +331,6 @@ so that a caller is not surprised by it.
   carry an ``ix``; all four resolve or fail on their name alone.
 """
 
-from __future__ import annotations
-
-from typing import Dict, List, Optional
 from xml.etree import ElementTree as ET
 
 from .document import strip_ns
@@ -430,7 +427,7 @@ def _is(doc, element, local_name: str) -> bool:
 
 # -- paths ------------------------------------------------------------------
 
-def _named_ancestors(doc, element) -> List[ET.Element]:
+def _named_ancestors(doc, element) -> list[ET.Element]:
     """``element``'s ancestors below the root that carry a ``name``, outermost
     first.
 
@@ -439,7 +436,7 @@ def _named_ancestors(doc, element) -> List[ET.Element]:
     none of them: every container in the Substation section extends
     `tNaming`.
     """
-    chain: List[ET.Element] = []
+    chain: list[ET.Element] = []
     cursor = doc.parent_of(element)
     while cursor is not None and cursor is not doc.root:
         if cursor.get("name") is not None:
@@ -449,7 +446,7 @@ def _named_ancestors(doc, element) -> List[ET.Element]:
     return chain
 
 
-def _path_of(doc, node, renamed=None) -> Optional[str]:
+def _path_of(doc, node, renamed=None) -> str | None:
     """The `pathName` ``node`` should carry, built from its own ancestry.
 
     ``renamed`` is an optional ``(element, new name)`` pair: where that element
@@ -478,11 +475,11 @@ def _path_of(doc, node, renamed=None) -> Optional[str]:
     return "/".join(segment or "" for segment in segments)
 
 
-def _connectivity_nodes(doc) -> List[ET.Element]:
+def _connectivity_nodes(doc) -> list[ET.Element]:
     return list(_own(doc, "ConnectivityNode"))
 
 
-def _connectivity_index(doc) -> Dict[str, Optional[ET.Element]]:
+def _connectivity_index(doc) -> dict[str, ET.Element | None]:
     """``{pathName: the node carrying it}``, and ``None`` where two carry one.
 
     This is what turns a `Terminal`'s `@connectivityNode` from a string that
@@ -497,7 +494,7 @@ def _connectivity_index(doc) -> Dict[str, Optional[ET.Element]]:
     document invalid already, and an ambiguous reference is not this
     function's to resolve by picking the first.
     """
-    index: Dict[str, Optional[ET.Element]] = {}
+    index: dict[str, ET.Element | None] = {}
     for node in _connectivity_nodes(doc):
         path = node.get("pathName")
         if not path:
@@ -509,12 +506,12 @@ def _connectivity_index(doc) -> Dict[str, Optional[ET.Element]]:
     return index
 
 
-def _terminals(doc) -> List[ET.Element]:
+def _terminals(doc) -> list[ET.Element]:
     """Every `Terminal` and every `NeutralPoint`, namespace-exact.
 
     Both, because `tTerminal` types both -- see :data:`TERMINAL_ELEMENTS`.
     """
-    out: List[ET.Element] = []
+    out: list[ET.Element] = []
     for local_name in TERMINAL_ELEMENTS:
         out.extend(_own(doc, local_name))
     return out
@@ -522,7 +519,7 @@ def _terminals(doc) -> List[ET.Element]:
 
 # -- renaming ---------------------------------------------------------------
 
-def _collision(doc, element, new_name: str) -> Optional[ET.Element]:
+def _collision(doc, element, new_name: str) -> ET.Element | None:
     """The sibling ``new_name`` would collide with, or ``None``.
 
     **The set is the schema's own, and it is not the same at every level.**
@@ -554,7 +551,7 @@ def _collision(doc, element, new_name: str) -> Optional[ET.Element]:
                 None)
 
 
-def _rename_edits(doc, edit, local_name: str) -> List:
+def _rename_edits(doc, edit, local_name: str) -> list:
     """``edit`` expanded: the rename, and every reference that has to follow.
 
     The engine behind :func:`update_substation`, :func:`update_voltage_level`
@@ -596,7 +593,7 @@ def _rename_edits(doc, edit, local_name: str) -> List:
             f"{new_name!r}; the schema gives a container's children one name "
             f"space across all of their tags")
 
-    edits: List = [edit]
+    edits: list = [edit]
     if old_name is None:
         # Nothing can refer to it: a path is built from ancestor names and an
         # ancestor with no name cannot have contributed one. The rename is
@@ -610,7 +607,7 @@ def _rename_edits(doc, edit, local_name: str) -> List:
     #    Computed from each node's own ancestry with the new name substituted,
     #    never by editing the old string -- the module docstring says why a
     #    path cannot be split.
-    moved: Dict[str, str] = {}
+    moved: dict[str, str] = {}
     for node in _connectivity_nodes(doc):
         if node not in inside:
             continue
@@ -637,7 +634,7 @@ def _rename_edits(doc, edit, local_name: str) -> List:
         reference = terminal.get("connectivityNode")
         if not reference or reference in ambiguous or reference not in moved:
             continue
-        wanted: Dict[str, Optional[str]] = {
+        wanted: dict[str, str | None] = {
             "connectivityNode": moved[reference]}
         if terminal.get(attribute) == old_name:
             wanted[attribute] = new_name
@@ -666,7 +663,7 @@ def _snake(local_name: str) -> str:
     return "".join(out)
 
 
-def update_substation(doc, edit) -> List:
+def update_substation(doc, edit) -> list:
     """``edit`` expanded: a `Substation` rename, and everything that named it.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on a `Substation`. If it
@@ -694,7 +691,7 @@ def update_substation(doc, edit) -> List:
     return _rename_edits(doc, edit, "Substation")
 
 
-def update_voltage_level(doc, edit) -> List:
+def update_voltage_level(doc, edit) -> list:
     """``edit`` expanded: a `VoltageLevel` rename, and everything that named
     it.
 
@@ -709,7 +706,7 @@ def update_voltage_level(doc, edit) -> List:
     return _rename_edits(doc, edit, "VoltageLevel")
 
 
-def update_bay(doc, edit) -> List:
+def update_bay(doc, edit) -> list:
     """``edit`` expanded: a `Bay` rename, and everything that named it.
 
     The shape is :func:`update_substation`'s, with `@bayName` as the
@@ -730,7 +727,7 @@ def update_bay(doc, edit) -> List:
 
 # -- removing ---------------------------------------------------------------
 
-def _process_root(doc, element) -> Optional[ET.Element]:
+def _process_root(doc, element) -> ET.Element | None:
     """The `Substation`, `Line` or `Process` ``element`` is in, or ``None``.
 
     ``element`` itself counts, so removing a whole `Substation` is in scope.
@@ -744,7 +741,7 @@ def _process_root(doc, element) -> Optional[ET.Element]:
     return None
 
 
-def remove_process_element(doc, edit) -> List:
+def remove_process_element(doc, edit) -> list:
     """``edit`` expanded: the removal, and the elements it orphans.
 
     ``edit`` is a :class:`~py61850.scl.Remove` whose node is in the primary
@@ -801,7 +798,7 @@ def remove_process_element(doc, edit) -> List:
             f"a {_describe(node)} outside every Substation, Line and Process "
             f"is not a process element; removing an IED is remove_ied's")
 
-    edits: List = [edit]
+    edits: list = [edit]
     inside = set(node.iter())
 
     going = {cn.get("pathName") for cn in _connectivity_nodes(doc)
@@ -840,7 +837,7 @@ def _spec(local_name: str) -> str:
     return SPECIFICATION_NS + local_name
 
 
-def _specification_roots(doc, lnode) -> List[ET.Element]:
+def _specification_roots(doc, lnode) -> list[ET.Element]:
     """Every `DOS` attached to ``lnode``, in document order.
 
     **Both schema-valid attachment points.** ``tBaseElement`` opens with an
@@ -855,7 +852,7 @@ def _specification_roots(doc, lnode) -> List[ET.Element]:
     A `Private` is descended one level and no further: a `DOS` nested deeper
     inside one belongs to whatever structure put it there.
     """
-    found: List[ET.Element] = []
+    found: list[ET.Element] = []
     for child in lnode:
         if child.tag == _spec("DOS"):
             found.append(child)
@@ -865,7 +862,7 @@ def _specification_roots(doc, lnode) -> List[ET.Element]:
     return found
 
 
-def _specification_children(node) -> List[ET.Element]:
+def _specification_children(node) -> list[ET.Element]:
     """The `SDS` and `DAS` directly under ``node``, in document order.
 
     Nothing else: a `DOS` may also hold `SubscriberLNode`, `ControllingLNode`,
@@ -924,7 +921,7 @@ def _resolve_below(pool, context, name):
     return pool.da_type(attribute.type)
 
 
-def _missing_below(pool, node, context) -> List[ET.Element]:
+def _missing_below(pool, node, context) -> list[ET.Element]:
     """The specification elements under ``node`` that ``context`` does not
     declare.
 
@@ -940,7 +937,7 @@ def _missing_below(pool, node, context) -> List[ET.Element]:
     all, so `SDS` is simply the spelling depth takes. Matching on the element
     name instead of the attribute name would remove every one of them.
     """
-    missing: List[ET.Element] = []
+    missing: list[ET.Element] = []
     for child in _specification_children(node):
         name = child.get("name")
         below = "gone" if name is None else _resolve_below(pool, context, name)
@@ -981,7 +978,7 @@ def _declaring_pool(doc, id_, source):
     return pool, declaration
 
 
-def prune_lnode_specification(doc, id_, source=None) -> List:
+def prune_lnode_specification(doc, id_, source=None) -> list:
     """Remove what `LNodeType` ``id_`` no longer declares, from every `LNode`
     using it.
 
@@ -1034,7 +1031,7 @@ def prune_lnode_specification(doc, id_, source=None) -> List:
     """
     pool, declaration = _declaring_pool(doc, id_, source)
 
-    edits: List = []
+    edits: list = []
     for lnode in _own(doc, "LNode"):
         if lnode.get("lnType") != id_:
             continue

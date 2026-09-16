@@ -18,8 +18,8 @@ is pure bytes-in/bytes-out.
 import socket
 import struct
 
-from . import tpkt
 from ..errors import TransportError
+from . import tpkt
 
 CR = 0xE0
 CC = 0xD0

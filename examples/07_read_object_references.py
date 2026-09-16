@@ -108,7 +108,7 @@ def main():
             td = decode_data_definition(c.get_data_definition(ld, do))
             members = [m["name"] for m in td["type"]["structure"]]
             print(f"\nwhole data object  {ld}/{do}")
-            for name, value in zip(members, values):
+            for name, value in zip(members, values, strict=False):
                 print(f"  {name:<8} {value!r}")
 
         # 3) When a reference will not resolve, the LD's name list is the

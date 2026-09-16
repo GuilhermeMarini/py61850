@@ -13,8 +13,7 @@ import unittest
 from py61850.core import ber
 from py61850.errors import TransportError
 from py61850.mms import pdu
-from py61850.osi import acse, presentation, session, stack, tpkt
-from py61850.osi import cotp
+from py61850.osi import acse, cotp, presentation, session, stack, tpkt
 from py61850.osi.cotp import CotpTransport
 
 

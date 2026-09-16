@@ -124,15 +124,13 @@ from .control_block import (
     update_dat_set,
     updated_conf_rev,
 )
-from .data_types import (
-    DATA_TYPE_TAGS,
-    ON_CONFLICT,
-    TypeImport,
-    import_lnode_types,
-    lnode_type_conflicts,
-    remove_data_type,
-    same_data_type,
-    update_lnode_type,
+from .controls import (
+    CONTROL_BLOCK_TAGS,
+    FCDA,
+    ControlBlock,
+    DataSet,
+    ExtRef,
+    SettingControl,
 )
 from .data_set import (
     MaxAttributes,
@@ -145,6 +143,80 @@ from .data_set import (
     remove_fcda,
     update_data_set,
     updated_conf_rev_edits,
+)
+from .data_types import (
+    DATA_TYPE_TAGS,
+    ON_CONFLICT,
+    TypeImport,
+    import_lnode_types,
+    lnode_type_conflicts,
+    remove_data_type,
+    same_data_type,
+    update_lnode_type,
+)
+from .document import (
+    Header,
+    SclDocument,
+    children_local,
+    iter_local,
+    privates_of,
+    strip_ns,
+)
+from .edit import (
+    EditRejected,
+    Insert,
+    Remove,
+    SetAttributes,
+    SetTextContent,
+)
+from .extref import (
+    Connection,
+    TypeRestriction,
+    ext_ref_type_restrictions,
+    fcda_covers_ext_ref,
+    fcda_meets_ext_ref_restrictions,
+    fcda_type,
+    is_subscribed,
+    match_data_attributes,
+    match_src_attributes,
+    source_control_block,
+    subscribe,
+    unsubscribe,
+)
+from .generator import (
+    ALLOCATED_NAME_PREFIX,
+    ALLOCATED_NAME_SUFFIX_START,
+    APP_ID_RANGES,
+    LN_INST_ELEMENTS,
+    LN_INST_RANGE,
+    MAC_ADDRESS_PREFIXES,
+    SERVICE_TYPES,
+    next_app_id,
+    next_ln_inst,
+    next_mac_address,
+    unique_element_name,
+)
+from .ied import (
+    IED_NAME_ELEMENTS,
+    ORPHAN_IED_NAME,
+    insert_ied,
+    remove_ied,
+    update_ied,
+)
+from .model import (
+    AccessPoint,
+    DataAttribute,
+    DataObject,
+    Ied,
+    IedHeader,
+    LDevice,
+    LogicalNode,
+    Server,
+)
+from .ordering import (
+    content_model,
+    may_contain,
+    reference_for,
 )
 from .report_control import (
     MaxReportControl,
@@ -172,42 +244,6 @@ from .substation import (
     update_substation,
     update_voltage_level,
 )
-from .controls import (
-    CONTROL_BLOCK_TAGS,
-    ControlBlock,
-    DataSet,
-    ExtRef,
-    FCDA,
-    SettingControl,
-)
-from .document import (
-    Header,
-    SclDocument,
-    children_local,
-    iter_local,
-    privates_of,
-    strip_ns,
-)
-from .generator import (
-    ALLOCATED_NAME_PREFIX,
-    ALLOCATED_NAME_SUFFIX_START,
-    APP_ID_RANGES,
-    LN_INST_ELEMENTS,
-    LN_INST_RANGE,
-    MAC_ADDRESS_PREFIXES,
-    SERVICE_TYPES,
-    next_app_id,
-    next_ln_inst,
-    next_mac_address,
-    unique_element_name,
-)
-from .ied import (
-    IED_NAME_ELEMENTS,
-    ORPHAN_IED_NAME,
-    insert_ied,
-    remove_ied,
-    update_ied,
-)
 from .supervision import (
     SUPERVISION_LN_CLASSES,
     SUPERVISION_REFERENCE_DOS,
@@ -220,42 +256,6 @@ from .supervision import (
     max_supervision,
     remove_supervision,
     supervision_ln_class,
-)
-from .extref import (
-    Connection,
-    TypeRestriction,
-    ext_ref_type_restrictions,
-    fcda_covers_ext_ref,
-    fcda_meets_ext_ref_restrictions,
-    fcda_type,
-    is_subscribed,
-    match_data_attributes,
-    match_src_attributes,
-    source_control_block,
-    subscribe,
-    unsubscribe,
-)
-from .edit import (
-    EditRejected,
-    Insert,
-    Remove,
-    SetAttributes,
-    SetTextContent,
-)
-from .ordering import (
-    content_model,
-    may_contain,
-    reference_for,
-)
-from .model import (
-    AccessPoint,
-    DataAttribute,
-    DataObject,
-    Ied,
-    IedHeader,
-    LDevice,
-    LogicalNode,
-    Server,
 )
 from .templates import AttributeSpec, DoTypeSpec, LNodeTypeSpec, TemplatePool
 

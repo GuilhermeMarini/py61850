@@ -24,10 +24,10 @@ import tempfile
 import unittest
 
 from py61850.scl import (
+    LN_INST_RANGE,
     Connection,
     EditRejected,
     Insert,
-    LN_INST_RANGE,
     Remove,
     SclDocument,
     SetTextContent,
@@ -35,6 +35,7 @@ from py61850.scl import (
     can_instantiate_supervision,
     can_remove_supervision,
     control_block_obj_ref,
+    find_control_block_subscription,
     instantiate_supervision,
     is_src_ref_editable,
     iter_local,
@@ -43,19 +44,16 @@ from py61850.scl import (
     remove_data_set,
     remove_fcda,
     remove_supervision,
+    source_control_block,
     subscribe,
     supervision_ln_class,
     unsubscribe,
 )
-from py61850.scl import (
-    find_control_block_subscription,
-    source_control_block,
-)
 from py61850.scl.supervision import (
     _bound_supervisions,
     _first_free,
-    _supervised_reference,
     _ied_of,
+    _supervised_reference,
     _supervision_lns,
     _watching,
 )

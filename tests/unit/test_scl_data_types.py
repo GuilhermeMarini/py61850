@@ -665,7 +665,9 @@ class TestCorpus(unittest.TestCase):
         invariant an import must add to and a removal must not break, and it
         is what makes `remove_data_type`'s `force` refuse on all 767."""
         from py61850.scl.data_types import (
-            _instance_lnode_types, _linked, _pool,
+            _instance_lnode_types,
+            _linked,
+            _pool,
         )
         for name in self.FILES:
             doc = self.corpus(name)
@@ -721,7 +723,10 @@ class TestCorpus(unittest.TestCase):
         every reference in the result resolves, and undoing it gives back the
         bytes `mixed.scd` came in as."""
         from py61850.scl.data_types import (
-            _instance_lnode_types, _linked, _pool, _referenced,
+            _instance_lnode_types,
+            _linked,
+            _pool,
+            _referenced,
         )
         target, source = self.corpus("mixed.scd"), self.corpus("siemens.scd")
         ids = self.ied_types(source, "QPC2_TR1_AL11")

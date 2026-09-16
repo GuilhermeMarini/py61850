@@ -11,8 +11,8 @@ import unittest
 
 from py61850.core import ber
 from py61850.mms import types
-from py61850.mms.service_error import decode_service_error
 from py61850.mms.pdu import CONFIRMED_ERROR
+from py61850.mms.service_error import decode_service_error
 
 
 def _component(name, type_tlv):

@@ -100,9 +100,7 @@ from py61850.scl import (
     SetAttributes,
     SetTextContent,
 )
-
 from tests.unit import roundtrip
-
 
 # -- the script -------------------------------------------------------------
 #
@@ -226,7 +224,7 @@ def _spec(rng, parent_tag, depth=0):
     library, the thing producing a document nobody can load.
     """
     if depth == 0 and rng.randrange(10) == 0:
-        return NodeSpec(COMMENT, (), " generated %d " % rng.randrange(1000), ())
+        return NodeSpec(COMMENT, (), f" generated {rng.randrange(1000)} ", ())
     prefix = parent_tag[:parent_tag.index("}") + 1] if parent_tag.startswith("{") else ""
     tag = prefix + _TAGS[rng.randrange(len(_TAGS))]
     attrs = tuple(

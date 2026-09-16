@@ -68,10 +68,8 @@ restriction, which is the same thing the file already says about the 12,540
 ExtRefs in `sel.scd` that declare no `pDO` at all.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple
 from xml.etree import ElementTree as ET
 
 from .document import children_local, strip_ns
@@ -84,8 +82,10 @@ except ImportError:  # pragma: no cover
     # The table is derived from an IEC code component. Everything here works
     # without it; the `pDO`/`pDA` half of the restriction check simply has
     # nothing to check against. See the module docstring.
-    CDC_ATTRIBUTES: dict = {}
-    DO_CDC: dict = {}
+    # `no-redef`: the fallback for an optional generated table. mypy has no
+    # way to say "this name comes from the import OR from here".
+    CDC_ATTRIBUTES: dict = {}   # type: ignore[no-redef]
+    DO_CDC: dict = {}           # type: ignore[no-redef]
 
 #: The control-block elements an `ExtRef` can name, and the `serviceType` each
 #: one is published by. `LogControl` is absent on purpose: a log is written,
@@ -133,7 +133,7 @@ class Connection:
 
     sink: ET.Element
     fcda: ET.Element
-    control_block: Optional[ET.Element]
+    control_block: ET.Element | None
 
 
 class TypeRestriction(NamedTuple):
@@ -149,7 +149,7 @@ class TypeRestriction(NamedTuple):
     """
 
     cdc: str
-    btype: Optional[str]
+    btype: str | None
 
 
 # -- ancestry ---------------------------------------------------------------
@@ -169,7 +169,7 @@ def _ancestor(doc, element, local_name):
     return None
 
 
-def _ied_name(doc, element) -> Optional[str]:
+def _ied_name(doc, element) -> str | None:
     ied = _ancestor(doc, element, "IED")
     return None if ied is None else ied.get("name")
 
@@ -210,7 +210,7 @@ def _same(left, right) -> bool:
 
 # -- reading the restrictions -----------------------------------------------
 
-def ext_ref_type_restrictions(ext_ref) -> Optional[TypeRestriction]:
+def ext_ref_type_restrictions(ext_ref) -> TypeRestriction | None:
     """The common data class and basic type this `ExtRef` will accept.
 
     ``None`` when no valid specification can be produced -- there is no `pDO`,
@@ -513,7 +513,7 @@ def is_subscribed(doc, fcda, scope) -> bool:
 # -- subscribing ------------------------------------------------------------
 
 def subscribe(doc, connections, force=False, ignore_supervision=True,
-              check_only_btype=False, new_supervision_ln=False) -> List:
+              check_only_btype=False, new_supervision_ln=False) -> list:
     """The edit that binds each connection, as one compound edit.
 
     ``connections`` is one :class:`Connection` or a list of them. Build them
@@ -552,8 +552,8 @@ def subscribe(doc, connections, force=False, ignore_supervision=True,
     if isinstance(connections, Connection):
         connections = [connections]
 
-    edits: List = []
-    created_inputs = {}
+    edits: list = []
+    created_inputs: dict[int, ET.Element] = {}
     for connection in connections:
         edits.extend(_subscribe_one(doc, connection, force, check_only_btype,
                                     created_inputs))
@@ -599,14 +599,14 @@ def _subscribe_one(doc, connection, force, check_only_btype, created_inputs):
     return edits
 
 
-def _binding(doc, fcda, block, kind) -> dict:
+def _binding(doc, fcda, block, kind) -> dict[str, str | None]:
     """The attributes a subscription writes, in 61850-6's own order.
 
     Every one of them is named, with ``None`` for those this connection does
     not set, so binding an ExtRef that was bound to something else clears what
     does not apply instead of leaving half of the previous source behind.
     """
-    out = {name: None for name in BINDING_ATTRIBUTES}
+    out: dict[str, str | None] = {name: None for name in BINDING_ATTRIBUTES}
     out["iedName"] = _ied_name(doc, fcda)
     for name in DATA_ATTRIBUTES[1:]:
         out[name] = fcda.get(name) or None
@@ -671,7 +671,7 @@ def _qualify(doc, local_name) -> str:
 
 # -- unsubscribing ----------------------------------------------------------
 
-def unsubscribe(doc, ext_refs, ignore_supervision=True) -> List:
+def unsubscribe(doc, ext_refs, ignore_supervision=True) -> list:
     """The edit that unbinds each `ExtRef`, as one compound edit.
 
     An `ExtRef` with `intAddr` is blanked and kept: the internal address is
@@ -700,8 +700,9 @@ def unsubscribe(doc, ext_refs, ignore_supervision=True) -> List:
     # subscribed. A caller passing a generator used to work and still does.
     ext_refs = list(ext_refs)
 
-    edits: List = []
-    removed = {}
+    edits: list = []
+    # `{id(Inputs): [the Inputs element, [the ExtRefs leaving it]]}`.
+    removed: dict[int, list] = {}
     for ext_ref in ext_refs:
         if not isinstance(ext_ref, ET.Element):
             raise EditRejected(

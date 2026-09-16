@@ -17,8 +17,6 @@ because ``DataTypeTemplates`` is station-wide. An instance tree without it
 would know an LN's ``lnType`` string and nothing else.
 """
 
-from __future__ import annotations
-
 from ..core.refs import ld_name as _ld_name
 from ..core.refs import ln_name as _ln_name
 from ..core.refs import mms_item as _mms_item
@@ -125,8 +123,7 @@ class LogicalNode:
     def walk(self):
         """Every data attribute in this logical node, depth first."""
         for do in self.data_objects.values():
-            for attr in do.walk():
-                yield attr
+            yield from do.walk()
 
     @property
     def data_sets(self) -> dict:
@@ -416,8 +413,7 @@ class DataAttribute:
         """This attribute and every attribute beneath it, depth first."""
         yield self
         for sub in self.sub_attributes.values():
-            for item in sub.walk():
-                yield item
+            yield from sub.walk()
 
     def __repr__(self):
         return f"<DataAttribute {self.mms_item()!r} bType={self.btype!r}>"

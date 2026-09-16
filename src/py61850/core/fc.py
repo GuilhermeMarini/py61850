@@ -22,8 +22,6 @@ because the two are not always available together -- see
 :func:`is_control_attribute`.
 """
 
-from __future__ import annotations
-
 from .refs import da_parts
 
 #: Every functional constraint IEC 61850-7-2 defines.

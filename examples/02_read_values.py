@@ -19,7 +19,7 @@ Demonstrates:
 
 import sys
 
-from py61850 import MmsClient, decode_read_response, decode_data_definition
+from py61850 import MmsClient, decode_data_definition, decode_read_response
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "192.0.2.22"
 
@@ -66,7 +66,7 @@ def main():
         members = td["type"]["structure"]
         values = c.read_value(ld, "LLN0$ST$Beh")
         print("labelled          :",
-              dict(zip((m["name"] for m in members), values)))
+              dict(zip((m["name"] for m in members), values, strict=False)))
 
 
 if __name__ == "__main__":

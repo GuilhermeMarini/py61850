@@ -155,14 +155,12 @@ returns live ELEMENTS, so a caller working in elements is never stale; a
 caller holding model objects across a removal must re-read. See Q14.
 """
 
-from __future__ import annotations
-
-from typing import List, Optional
 from xml.etree import ElementTree as ET
 
 from .controls import CONTROL_BLOCK_TAGS
 from .document import children_local, iter_local, strip_ns
 from .edit import EditRejected, Remove, SetAttributes
+
 # The ancestry helpers A8 wrote, used rather than written again: an `ExtRef`
 # and a control block ask the same questions of the same tree, and two copies
 # of "which IED is this in" is how the two modules drift apart.
@@ -229,7 +227,7 @@ def _is_control_block(element) -> bool:
 
 # -- queries ----------------------------------------------------------------
 
-def control_blocks(doc, fcda_or_data_set) -> List[ET.Element]:
+def control_blocks(doc, fcda_or_data_set) -> list[ET.Element]:
     """Every control block that publishes ``fcda_or_data_set``, in file order.
 
     ``fcda_or_data_set`` is a `DataSet`, or an `FCDA` inside one -- a member
@@ -269,7 +267,7 @@ def control_blocks(doc, fcda_or_data_set) -> List[ET.Element]:
             and child.get("datSet") == name]
 
 
-def find_control_block_subscription(doc, control) -> List[ET.Element]:
+def find_control_block_subscription(doc, control) -> list[ET.Element]:
     """Every `ExtRef` in the document subscribed to ``control``.
 
     Edition 2, through the `src*` attributes, which is the same match
@@ -299,7 +297,7 @@ def find_control_block_subscription(doc, control) -> List[ET.Element]:
     return out
 
 
-def control_block_obj_ref(doc, control_block) -> Optional[str]:
+def control_block_obj_ref(doc, control_block) -> str | None:
     """The IEC 61850-7-2 object reference of ``control_block``, or ``None``.
 
     ``<IED name><LDevice inst>/<prefix><lnClass><inst>.<control block name>``,
@@ -328,7 +326,7 @@ def control_block_obj_ref(doc, control_block) -> Optional[str]:
             f".{control_block.get('name')}")
 
 
-def path_id(doc, ln0, cb_name) -> Optional[str]:
+def path_id(doc, ln0, cb_name) -> str | None:
     """``<IED name>/<LDevice inst>/<lnClass>/<cb_name>`` for a control block
     that ``ln0`` holds or would hold.
 
@@ -364,7 +362,7 @@ def path_id(doc, ln0, cb_name) -> Optional[str]:
     return f"{ied_name}/{ld_inst}/{prefix}{ln_class}{ln_inst}/{cb_name}"
 
 
-def control_block_gse_or_smv(doc, control_block) -> Optional[ET.Element]:
+def control_block_gse_or_smv(doc, control_block) -> ET.Element | None:
     """The `GSE` or `SMV` element addressing ``control_block``, or ``None``.
 
     A `GSEControl` is addressed by a `GSE` and a `SampledValueControl` by an
@@ -464,7 +462,7 @@ def _is_exclusive(doc, data_set, control) -> bool:
 
 # -- edit checks ------------------------------------------------------------
 
-def update_dat_set(doc, edit) -> List:
+def update_dat_set(doc, edit) -> list:
     """``edit`` corrected: the `DataSet` renamed with it, and `confRev` moved.
 
     ``edit`` is a :class:`~py61850.scl.SetAttributes` on a control block. If
@@ -513,7 +511,7 @@ def update_dat_set(doc, edit) -> List:
     if _same(wanted, control.get("datSet")):
         return [edit]
 
-    edits: List = [edit]
+    edits: list = [edit]
     renamed = False
     data_set = _data_set_of(doc, control)
     if data_set is not None and wanted and _is_exclusive(doc, data_set, control):
@@ -535,7 +533,7 @@ def update_dat_set(doc, edit) -> List:
     return edits
 
 
-def remove_control_block(doc, edit, ignore_supervision=True) -> List:
+def remove_control_block(doc, edit, ignore_supervision=True) -> list:
     """``edit`` expanded: the block, its subscribers, its dataset, its address.
 
     ``edit`` is a :class:`~py61850.scl.Remove` whose node is a `GSEControl`,
@@ -594,7 +592,7 @@ def remove_control_block(doc, edit, ignore_supervision=True) -> List:
             f"{strip_ns(control.tag) or type(control).__name__} is not a "
             f"control block; expected one of {', '.join(CONTROL_BLOCK_TAGS)}")
 
-    edits: List = [edit]
+    edits: list = [edit]
 
     subscribers = find_control_block_subscription(doc, control)
     if subscribers:

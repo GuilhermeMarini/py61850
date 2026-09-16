@@ -170,9 +170,6 @@ that fails at the vendor tool. :func:`unique_element_name` cannot exhaust: its
 suffix is unbounded.
 """
 
-from __future__ import annotations
-
-from typing import List
 from xml.etree import ElementTree as ET
 
 from .document import strip_ns
@@ -261,7 +258,7 @@ def _root_of(document) -> ET.Element:
     return root
 
 
-def _p_values(root, p_type) -> List[str]:
+def _p_values(root, p_type) -> list[str]:
     """Every `P` of this type in the document, namespace-exact.
 
     **Namespace-exact and document-wide.** A MAC address is unique across the
@@ -282,7 +279,7 @@ def _normalised(values) -> set:
     return {value.strip().upper() for value in values if value and value.strip()}
 
 
-def _children(parent, local_name) -> List[ET.Element]:
+def _children(parent, local_name) -> list[ET.Element]:
     """Direct children of this local name, in the parent's own namespace."""
     wanted = _namespace(parent.tag) + local_name
     return [child for child in parent if child.tag == wanted]

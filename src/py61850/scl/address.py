@@ -209,15 +209,12 @@ retransmission bound is a timing decision rather than a free value to pick.
 All 146 corpus GSEs write both.
 """
 
-from __future__ import annotations
-
-from typing import List, Optional
 from xml.etree import ElementTree as ET
 
 from .document import strip_ns
-from .generator import next_app_id, next_mac_address
 from .edit import EditRejected, Insert, SetAttributes, SetTextContent
 from .extref import _qualify, _same
+from .generator import next_app_id, next_mac_address
 from .ordering import reference_for
 
 #: The `P` types an address may carry, in the order the creates write them.
@@ -251,14 +248,14 @@ def _describe(element) -> str:
             else type(element).__name__)
 
 
-def _address_of(element) -> Optional[ET.Element]:
+def _address_of(element) -> ET.Element | None:
     """``element``'s `Address` child, or ``None``. First wins: `tControlBlock`
     declares at most one and no corpus file writes a second."""
     return next((child for child in element
                  if strip_ns(child.tag) == "Address"), None)
 
 
-def _p_element(address, p_type) -> Optional[ET.Element]:
+def _p_element(address, p_type) -> ET.Element | None:
     """The `P` of this type in ``address``, or ``None``.
 
     Matched case-insensitively, as :class:`~py61850.scl.Address` matches, and
@@ -390,7 +387,7 @@ def _allocated_address(doc, service_type, mac, app_id, taken=()):
 
 def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
                vlan_id=None, vlan_priority=None, min_time=None, max_time=None,
-               inst_type=None, taken=()) -> List:
+               inst_type=None, taken=()) -> list:
     """The edit that adds a `GSE` addressing one `GSEControl`.
 
     The `SMV` of :func:`create_smv` with two more children. ``connected_ap``
@@ -442,7 +439,7 @@ def create_gse(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
 
 def create_smv(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
                vlan_id=None, vlan_priority=None, inst_type=None,
-               taken=()) -> List:
+               taken=()) -> list:
     """The edit that adds an `SMV` addressing one `SampledValueControl`.
 
     ``connected_ap`` is the `ConnectedAP` of the IED that publishes the
@@ -491,7 +488,7 @@ def create_smv(doc, connected_ap, ld_inst, cb_name, mac=None, app_id=None,
 
 def change_gse_or_smv_address(doc, gse_or_smv, mac=None, app_id=None,
                               vlan_id=None, vlan_priority=None,
-                              inst_type=None) -> List:
+                              inst_type=None) -> list:
     """The edits that give ``gse_or_smv`` these address parameters.
 
     The engine :func:`change_gse_content` and :func:`change_smv_content`
@@ -542,7 +539,7 @@ def change_gse_or_smv_address(doc, gse_or_smv, mac=None, app_id=None,
                        reference_for(gse_or_smv, address.tag))]
 
     write_inst_type = _follows(address, inst_type)
-    edits: List = []
+    edits: list = []
     for p_type in P_TYPES:
         value = values[p_type]
         if value is None:
@@ -563,7 +560,7 @@ def change_gse_or_smv_address(doc, gse_or_smv, mac=None, app_id=None,
 
 def change_gse_content(doc, gse, mac=None, app_id=None, vlan_id=None,
                        vlan_priority=None, min_time=None, max_time=None,
-                       inst_type=None) -> List:
+                       inst_type=None) -> list:
     """The edits that change a `GSE`'s address and its GOOSE timing.
 
     :func:`change_gse_or_smv_address` plus `MinTime` and `MaxTime`, which are
@@ -601,7 +598,7 @@ def change_gse_content(doc, gse, mac=None, app_id=None, vlan_id=None,
 
 
 def change_smv_content(doc, smv, mac=None, app_id=None, vlan_id=None,
-                       vlan_priority=None, inst_type=None) -> List:
+                       vlan_priority=None, inst_type=None) -> list:
     """The edits that change an `SMV`'s address.
 
     :func:`change_gse_or_smv_address` with the tag pinned. `tSMV` extends
@@ -626,7 +623,7 @@ def change_smv_content(doc, smv, mac=None, app_id=None, vlan_id=None,
 
 # -- which ConnectedAP ------------------------------------------------------
 
-def connected_ap_for(doc, ied_name, ap_name=None) -> Optional[ET.Element]:
+def connected_ap_for(doc, ied_name, ap_name=None) -> ET.Element | None:
     """The `ConnectedAP` that publishes for ``ied_name``, or ``None``.
 
     ``ap_name`` names one access point. Without it the default is the
@@ -675,7 +672,7 @@ def connected_ap_for(doc, ied_name, ap_name=None) -> Optional[ET.Element]:
     return fallback
 
 
-def _server_access_point(doc, ied_name) -> Optional[str]:
+def _server_access_point(doc, ied_name) -> str | None:
     """The name of ``ied_name``'s `AccessPoint` that holds a `Server`."""
     for ied in doc.root.iter():
         if strip_ns(ied.tag) != "IED" or not _same(ied.get("name"), ied_name):
