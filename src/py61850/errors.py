@@ -33,7 +33,17 @@ class TransportError(Iec61850Error):
 
 
 class MmsError(Iec61850Error):
-    """MMS-level failure: association refused, service error, or reject PDU."""
+    """MMS-level failure: association refused, service error, or reject PDU.
+
+    For a service error the server sent, ``error_class`` and ``error_code``
+    name it -- ``"file"`` and ``"file-busy"`` -- so a caller can decide what to
+    do without parsing the message. Both are ``None`` for every other failure.
+    """
+
+    def __init__(self, *args, error_class=None, error_code=None):
+        super().__init__(*args)
+        self.error_class = error_class
+        self.error_code = error_code
 
 
 class LinkError(Iec61850Error):

@@ -28,16 +28,21 @@ never grows a socket, so it does not import :mod:`py61850.osi` or
 
 from ..core import ber
 from ..core.data import decode_data
+from ..core.time import decode_generalized_time
 from ..errors import MmsError
-from .service_error import decode_service_error
+from .service_error import decode_reject, decode_service_error, service_error_kind
 
 # ---- PDU-level CHOICE tags ----------------------------------------------
 CONFIRMED_REQUEST = 0xA0
 CONFIRMED_RESPONSE = 0xA1
 CONFIRMED_ERROR = 0xA2
-REJECT = 0xA3
+UNCONFIRMED = 0xA3            # [3] -- reports arrive in this, not as a reply
+REJECT = 0xA4
 INITIATE_REQUEST = 0xA8
 INITIATE_RESPONSE = 0xA9
+CONCLUDE_REQUEST = 0x8B       # [11] NULL
+CONCLUDE_RESPONSE = 0x8C      # [12] NULL
+CONCLUDE_ERROR = 0xAD         # [13] ServiceError
 
 # ---- confirmed-service CHOICE tags --------------------------------------
 SVC_GET_NAME_LIST = 0xA1
@@ -72,6 +77,11 @@ def confirmed_response(invoke_id: int, service: bytes) -> bytes:
     return ber.tlv(CONFIRMED_RESPONSE, ber.int_tlv(0x02, invoke_id) + service)
 
 
+def build_conclude() -> bytes:
+    """conclude-RequestPDU: the orderly end of an association."""
+    return ber.tlv(CONCLUDE_REQUEST, b"")
+
+
 def object_name(domain: str, item: str) -> bytes:
     """ObjectName -> domain-specific [1] { domainId, itemId } (as VisibleString)."""
     ds = ber.tlv(VISIBLE_STRING, domain.encode()) + ber.tlv(VISIBLE_STRING, item.encode())
@@ -91,9 +101,10 @@ def service_from_response(mms: bytes) -> bytes:
                 return ber.tlv(t, v)
         return b""
     if tag == CONFIRMED_ERROR:
-        raise MmsError(decode_service_error(mms))
+        cls, code = service_error_kind(mms)
+        raise MmsError(decode_service_error(mms), error_class=cls, error_code=code)
     if tag == REJECT:
-        raise MmsError(f"service rejected: {mms.hex()}")
+        raise MmsError(decode_reject(mms))
     raise MmsError(f"unexpected MMS response tag 0x{tag:02x}")
 
 
@@ -279,12 +290,14 @@ def build_file_open(name: str, initial_position: int = 0) -> bytes:
     return ber.tlv(SVC_FILE_OPEN, req)
 
 
+# The FRSM ID is an Integer32 -- signed. Relays hand out negative ones, and one
+# sent back with enc_uint's extra 0x00 is five octets, which the relay rejects.
 def build_file_read(frsm_id: int) -> bytes:
-    return ber.tlv(SVC_FILE_READ, ber.enc_uint(frsm_id))
+    return ber.tlv(SVC_FILE_READ, ber.enc_int(frsm_id))
 
 
 def build_file_close(frsm_id: int) -> bytes:
-    return ber.tlv(SVC_FILE_CLOSE, ber.enc_uint(frsm_id))
+    return ber.tlv(SVC_FILE_CLOSE, ber.enc_int(frsm_id))
 
 
 class DirEntry:
@@ -340,22 +353,28 @@ def _decode_dir_entry(ev):
                 if at == 0x80:                          # sizeOfFile
                     size = int.from_bytes(av, "big")
                 elif at == 0x81:                        # lastModified GeneralizedTime
-                    lm = av.decode("latin-1", "replace")
+                    lm = decode_generalized_time(av)
     return DirEntry(name, size, lm)
 
 
 def decode_file_open(service_bytes: bytes):
-    """fileOpen-Response -> (frsm_id, size_or_None)."""
+    """fileOpen-Response -> (frsm_id, size_or_None, last_modified_or_None).
+
+    size and lastModified are the only identity MMS gives a file -- there is no
+    checksum service -- so they are what a resumed download is checked against.
+    """
     _, body, _ = ber.read_tlv(service_bytes, 0)
-    frsm_id, size = None, None
+    frsm_id, size, lm = None, None, None
     for t, v in ber.iter_tlv(body):
-        if t == 0x80:                                   # frsmID [0]
-            frsm_id = int.from_bytes(v, "big")
+        if t == 0x80:                                   # frsmID [0] Integer32
+            frsm_id = int.from_bytes(v, "big", signed=True)
         elif t == 0xA1:                                 # fileAttributes [1]
             for at, av in ber.iter_tlv(v):
-                if at == 0x80:
+                if at == 0x80:                          # sizeOfFile [0]
                     size = int.from_bytes(av, "big")
-    return frsm_id, size
+                elif at == 0x81:                        # lastModified [1] GeneralizedTime
+                    lm = decode_generalized_time(av)
+    return frsm_id, size, lm
 
 
 def decode_file_read(service_bytes: bytes):

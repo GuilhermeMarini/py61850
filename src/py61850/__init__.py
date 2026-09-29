@@ -20,6 +20,9 @@ Public API
     DirEntry       one entry returned by FileTransfer.file_directory()
     LogicalNode    one LN returned by MmsClient.find_logical_nodes()
     folder_of      the folder part of an MMS file name, for grouping hits
+    RetryPolicy    how FileTransfer.get_file / download_file retry on their own
+    TransferState  where an interrupted download stopped; resume from it
+    is_retryable   whether retrying could change the answer an error gave
 
     FUNCTIONAL_CONSTRAINTS / fc_is_control / fc_read_rank
                    the 61850-7-2 functional constraints, shared by the SCL
@@ -84,9 +87,10 @@ from .mms.pdu import DirEntry, decode_read_response
 from .mms.service_error import decode_service_error
 from .mms.services.directory import LogicalNode
 from .mms.services.files import folder_of
+from .mms.services.transfer import RetryPolicy, TransferState, is_retryable
 from .mms.types import decode_data_definition
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "MmsClient",
@@ -94,6 +98,9 @@ __all__ = [
     "DirEntry",
     "LogicalNode",
     "folder_of",
+    "RetryPolicy",
+    "TransferState",
+    "is_retryable",
     "FUNCTIONAL_CONSTRAINTS",
     "fc_is_control",
     "fc_read_rank",

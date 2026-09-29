@@ -42,15 +42,29 @@ class TestEnvelope(unittest.TestCase):
         # confirmed-ErrorPDU { invokeID, serviceError { errorClass file/file-busy } }
         err = ber.tlv(pdu.CONFIRMED_ERROR,
                       ber.tlv(0x80, b"\x03")
-                      + ber.tlv(0xA2, ber.tlv(0xA0, ber.tlv(0x8B, b"\x01"))))
+                      + ber.tlv(0xA2, ber.tlv(0xA0, ber.tlv(0x8B, b"\x02"))))
         with self.assertRaises(MmsError) as cm:
             pdu.service_from_response(err)
         self.assertIn("file/file-busy", str(cm.exception))
+        self.assertEqual((cm.exception.error_class, cm.exception.error_code),
+                         ("file", "file-busy"))
         self.assertIn("invoke 3", str(cm.exception))
 
     def test_reject_raises(self):
         with self.assertRaises(MmsError):
             pdu.service_from_response(ber.tlv(pdu.REJECT, b"\x00"))
+
+    def test_reject_is_tag_4_and_names_its_reason(self):
+        # RejectPDU { originalInvokeID 7, confirmed-requestPDU invalid-argument }
+        rej = bytes.fromhex("a406800107810104")
+        self.assertEqual(pdu.REJECT, 0xA4)
+        with self.assertRaises(MmsError) as cm:
+            pdu.service_from_response(rej)
+        self.assertEqual(str(cm.exception),
+                         "rejected: confirmed-request/invalid-argument (invoke 7)")
+
+    def test_conclude_request_is_an_empty_tag_11(self):
+        self.assertEqual(pdu.build_conclude(), b"\x8b\x00")
 
     def test_unexpected_tag_raises(self):
         with self.assertRaises(MmsError):
@@ -204,7 +218,48 @@ class TestFileServices(unittest.TestCase):
     def test_decode_file_open(self):
         body = ber.tlv(0x80, b"\x07") + ber.tlv(0xA1, ber.tlv(0x80, ber.enc_uint(500)))
         self.assertEqual(pdu.decode_file_open(ber.tlv(pdu.SVC_FILE_OPEN, body)),
-                         (7, 500))
+                         (7, 500, None))
+
+    def test_sel_space_padded_last_modified_is_repaired(self):
+        """As SEL-451 and SEL-311C send it: a space where each field's leading
+        zero belongs."""
+        for sent, fixed in [("2026 928183420Z", "20260928183420Z"),
+                            ("1970 1 1 0 0 0Z", "19700101000000Z")]:
+            body = ber.tlv(0xA0, self._entry("/E/C4.TXT", 1, sent)) + ber.tlv(0x81, b"\x00")
+            entries, _ = pdu.decode_file_directory(ber.tlv(pdu.SVC_FILE_DIRECTORY, body))
+            self.assertEqual(entries[0].last_modified, fixed)
+            attrs = ber.tlv(0x80, ber.enc_uint(1)) + ber.tlv(0x81, sent.encode())
+            opened = ber.tlv(pdu.SVC_FILE_OPEN, ber.tlv(0x80, b"\x07") + ber.tlv(0xA1, attrs))
+            self.assertEqual(pdu.decode_file_open(opened)[2], fixed)
+
+    def test_a_last_modified_that_padding_cannot_explain_is_left_alone(self):
+        from py61850.core.time import decode_generalized_time
+        self.assertEqual(decode_generalized_time(b"not a time"), "not a time")
+        self.assertEqual(decode_generalized_time(b"20260928183420Z"), "20260928183420Z")
+        self.assertEqual(decode_generalized_time(b"20260928183420.5Z"),
+                         "20260928183420.5Z")
+
+    def test_decode_file_open_keeps_last_modified(self):
+        """size and lastModified are the file's only identity -- what a resumed
+        download is checked against -- so neither may be dropped."""
+        attrs = ber.tlv(0x80, ber.enc_uint(500)) + ber.tlv(0x81, b"20260927101500Z")
+        body = ber.tlv(0x80, b"\x07") + ber.tlv(0xA1, attrs)
+        self.assertEqual(pdu.decode_file_open(ber.tlv(pdu.SVC_FILE_OPEN, body)),
+                         (7, 500, "20260927101500Z"))
+
+    def test_frsm_id_is_signed_and_round_trips(self):
+        """Integer32: an ID with the top bit set is negative. Sent back with an
+        unsigned encoding it grows a fifth octet and the relay rejects it."""
+        raw = bytes.fromhex("a44c07ed")                # as a relay handed it out
+        body = ber.tlv(0x80, raw) + ber.tlv(0xA1, ber.tlv(0x80, ber.enc_uint(9677)))
+        frsm, _, _ = pdu.decode_file_open(ber.tlv(pdu.SVC_FILE_OPEN, body))
+        self.assertEqual(frsm, -1538521107)
+        self.assertEqual(pdu.build_file_read(frsm), ber.tlv(pdu.SVC_FILE_READ, raw))
+        self.assertEqual(pdu.build_file_close(frsm), ber.tlv(pdu.SVC_FILE_CLOSE, raw))
+
+    def test_positive_frsm_id_unchanged(self):
+        self.assertEqual(pdu.build_file_close(0x37DB00A6),
+                         ber.tlv(pdu.SVC_FILE_CLOSE, bytes.fromhex("37db00a6")))
 
     def test_decode_file_read_defaults_more_follows_true(self):
         resp = ber.tlv(pdu.SVC_FILE_READ, ber.tlv(0x80, b"abc"))

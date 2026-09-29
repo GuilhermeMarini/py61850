@@ -19,7 +19,7 @@ One client owns one socket and one invoke counter, so it is **not thread-safe**.
 One client per thread; a pool is ROADMAP 0.2.
 """
 
-from ..errors import MmsError
+from ..errors import Iec61850Error, MmsError, TransportError
 from ..osi import stack
 from ..osi.cotp import CotpTransport
 from . import pdu
@@ -35,6 +35,7 @@ class MmsClientBase:
     DEFAULT_MAX_PDU_SIZE = 1024
 
     def __init__(self, host, port=102, timeout=10):
+        self.host, self.port = host, port
         self.t = CotpTransport(host, port, timeout=timeout)
         self.invoke = 0
         # Negotiated in connect(); read-only for callers. max_pdu_size is the
@@ -42,6 +43,9 @@ class MmsClientBase:
         # what a batching read has to size itself against -- see read_many.
         self.max_pdu_size = self.DEFAULT_MAX_PDU_SIZE
         self.max_outstanding = 1
+        # True from a successful Initiate until close(), or until the
+        # transport fails -- after that a Conclude would only wait to time out.
+        self.associated = False
 
     def __enter__(self):
         self.connect()
@@ -61,17 +65,38 @@ class MmsClientBase:
         self.max_pdu_size = limits.get("localDetailCalled",
                                        self.DEFAULT_MAX_PDU_SIZE)
         self.max_outstanding = limits.get("maxServOutstandingCalling", 1)
+        self.associated = True
         return mms
 
     def close(self):
-        self.t.close()
+        """Conclude the association, then drop the connection.
+
+        Conclude is what tells the server the association is over, so it frees
+        what it holds for it -- open files, the association slot -- now rather
+        than when its inactivity timer fires. Without it a relay can refuse new
+        connections, or answer file-busy, until then. Best effort: a server
+        that does not answer the Conclude still has its socket closed.
+        """
+        try:
+            if self.associated:
+                self.associated = False
+                self.t.send(stack.wrap_mms_pdu(pdu.build_conclude()))
+                stack.extract_mms_from_response(self.t.recv())   # conclude-Response [12]
+        except Iec61850Error:
+            pass
+        finally:
+            self.t.close()
 
     # ---- data-phase transaction ------------------------------------------
     def _transact(self, service: bytes) -> bytes:
         """Send one confirmed request, return the service-response TLV bytes."""
         self.invoke = (self.invoke + 1) & 0x7FFF
-        self.t.send(stack.wrap_mms_pdu(pdu.confirmed_request(self.invoke, service)))
-        mms = stack.extract_mms_from_response(self.t.recv())
+        try:
+            self.t.send(stack.wrap_mms_pdu(pdu.confirmed_request(self.invoke, service)))
+            mms = stack.extract_mms_from_response(self.t.recv())
+        except TransportError:
+            self.associated = False
+            raise
         return pdu.service_from_response(mms)
 
 
