@@ -10,6 +10,9 @@
     GetServerDirectory{FILE}  -> FileDirectory
     GetFile                   -> FileOpen -> FileRead* -> FileClose
 
+GetFile retries and resumes when asked to; how, and how a resume is verified,
+is in :mod:`.transfer`.
+
 FileDirectory is one flat listing per call, so "which folders hold a .cfg?" is
 built here rather than in the protocol: :meth:`walk_files` descends the tree
 one FileDirectory at a time and :meth:`search_files` filters what it yields by
@@ -17,11 +20,19 @@ glob, extension and regex.
 """
 
 import fnmatch
-import os
 import re
+import time
+from dataclasses import replace
 
-from ...errors import MmsError
+from ...errors import Iec61850Error, MmsError, TransportError
 from .. import pdu
+from .transfer import (
+    MemorySink,
+    PartFileSink,
+    TransferState,
+    is_position_invalid,
+    load_part,
+)
 
 SEPARATORS = "/\\"
 
@@ -208,7 +219,17 @@ class FileServicesMixin:
         return sorted((e for e in found if matches(e.name)), key=lambda e: e.name)
 
     # ---- FileOpen / FileRead / FileClose ---------------------------------
+    #: Set once this server has refused, or silently ignored, an
+    #: initialPosition: resuming against it only ever restarts, so stop trying.
+    _seek_refused = False
+
     def file_open(self, name, initial_position=0):
+        """FileOpen. Returns ``(frsm_id, reported_size)``."""
+        frsm_id, size, _ = self._file_open(name, initial_position)
+        return frsm_id, size
+
+    def _file_open(self, name, initial_position=0):
+        """FileOpen -> ``(frsm_id, size, last_modified)``."""
         resp = self._transact(pdu.build_file_open(name, initial_position))
         return pdu.decode_file_open(resp)
 
@@ -220,37 +241,196 @@ class FileServicesMixin:
         self._transact(pdu.build_file_close(frsm_id))
 
     # ---- GetFile (high level) --------------------------------------------
-    def get_file(self, name, progress=None):
+    def get_file(self, name, progress=None, *, retry=None, resume_from=None,
+                 on_retry=None):
         """Download a file fully into memory. Returns the bytes.
 
-        `progress(bytes_so_far, reported_size)` is called once at 0 (so a bar
-        can learn the size FileOpen reports) and after every chunk.
+        `progress(bytes_so_far, reported_size)` is called once when the file is
+        opened (so a bar can learn the size FileOpen reports) and after every
+        chunk. A resumed or restarted transfer calls it again from where it
+        now stands.
+
+        A FileClose that fails is never silent: the IED may still hold the
+        handle, and once its few handles are gone every FileOpen answers
+        file-busy. After a failed read the read error propagates with the close
+        failure noted on it; after a good read the close failure raises.
+
+        Retry and resume, at whichever level the caller wants them:
+
+        * ``retry=RetryPolicy(...)`` -- the client retries on its own: backs
+          off on file-busy, reconnects after a transport failure, resumes from
+          the bytes it has. ``on_retry(attempt, error, offset)`` is called
+          before each retry. Without a policy nothing is retried.
+        * On its own terms -- every :class:`~py61850.Iec61850Error` raised here
+          carries ``.transfer``, a :class:`~py61850.TransferState`; reconnect
+          when you choose and pass it back as ``resume_from``.
+          :func:`~py61850.is_retryable` says whether retrying can help.
+
+        A resume is verified before it is trusted (see
+        :mod:`py61850.mms.services.transfer`); one that fails verification
+        restarts from byte 0.
         """
-        frsm_id, size = self.file_open(name)
-        chunks = []
-        got = 0
+        state = TransferState(name)
+        sink = MemorySink()
+        if resume_from is not None:
+            if resume_from.name != name:
+                raise MmsError(f"resume_from is a transfer of {resume_from.name!r}, "
+                               f"not of {name!r}")
+            if resume_from.data is None:
+                raise MmsError("resume_from holds no data -- a download_file "
+                               "transfer resumes with download_file(resume=True)")
+            state = replace(resume_from, data=None, path=None)
+            sink = MemorySink(resume_from.data)
+            state.offset = sink.size
+        self._get(sink, state, progress, retry, on_retry)
+        return bytes(sink.buf)
+
+    def download_file(self, name, local_path, progress=None, *, retry=None,
+                      resume=False, on_retry=None):
+        """Download a file straight to disk. Returns bytes written.
+
+        Bytes go to ``local_path + ".part"`` as they arrive and the file is
+        renamed into place only once complete, so ``local_path`` never holds a
+        partial file. A failed download leaves the ``.part``, and a
+        ``.part.json`` sidecar naming the remote file, behind; a later call
+        with ``resume=True`` continues it after the same checks an in-process
+        resume makes. Without ``resume`` an old ``.part`` is overwritten.
+
+        ``retry``, ``on_retry`` and the ``.transfer`` an error carries work as
+        for :meth:`get_file`; the state's ``path`` is the ``.part`` file.
+        """
+        origin = {"host": self.host, "port": self.port, "name": name}
+        state = load_part(local_path, origin) if resume else None
+        sink = PartFileSink(local_path, origin, keep=state is not None)
+        if state is None:
+            state = TransferState(name)
+        state.offset = sink.size
+        try:
+            self._get(sink, state, progress, retry, on_retry)
+        except BaseException:
+            sink.close()
+            raise
+        sink.commit()
+        return state.offset
+
+    # ---- the transfer loop -------------------------------------------------
+    def _get(self, sink, state, progress, retry, on_retry):
+        """Run one GetFile into `sink`, retrying as `retry` allows."""
+        attempt = 0
+        # A client whose association died on an earlier file starts on a new one.
+        reconnect = retry is not None and retry.reconnect and not self.associated
+        while True:
+            try:
+                if reconnect:
+                    self.close()
+                    self.connect()
+                    reconnect = False
+                self._get_once(sink, state, progress)
+                return
+            except Iec61850Error as ex:
+                state.offset = sink.size
+                sink.fill(state)
+                ex.transfer = replace(state)           # type: ignore[attr-defined]
+                state.data = None
+                if retry is None or attempt >= retry.retries or not retry.allows(ex):
+                    raise
+                attempt += 1
+                if on_retry is not None:
+                    on_retry(attempt, ex, state.offset)
+                time.sleep(retry.delay_before(attempt))
+                reconnect = isinstance(ex, TransportError)
+                if not retry.resume:
+                    sink.reset()
+                    state.forget()
+
+    def _open_identified(self, name, initial_position=0):
+        """FileOpen for GetFile, with a reported size of 0 read as unknown.
+
+        Schneider MiCOM (P139, P632) and GE UR (L90) answer every FileOpen with
+        sizeOfFile 0 and no lastModified, then send tens of kilobytes. Taken at
+        its word, that 0 would fail the length check on every file. A truly
+        empty file loses nothing by it: there is nothing to check.
+        """
+        frsm_id, size, lm = self._file_open(name, initial_position)
+        return frsm_id, size or None, lm
+
+    def _get_once(self, sink, state, progress):
+        """FileOpen -> FileRead* -> FileClose, continuing what `sink` holds
+        when that can be verified, from byte 0 when it cannot."""
+        frsm_id, overlap = None, 0
+        if sink.size and state.identified and not self._seek_refused:
+            state.offset = sink.size
+            overlap = state.overlap()
+            try:
+                frsm_id, size, lm = self._open_identified(state.name,
+                                                          sink.size - overlap)
+            except MmsError as ex:
+                if not is_position_invalid(ex):
+                    raise
+                self._seek_refused = True
+            else:
+                if not state.same_file(size, lm):
+                    self.file_close(frsm_id)           # not the file we have part of
+                    frsm_id = None
+        if frsm_id is None:
+            sink.reset()
+            state.forget()
+            overlap = 0
+            frsm_id, size, lm = self._open_identified(state.name)
+            state.size, state.last_modified = size, lm
+            sink.identify(state)
         if progress:
-            progress(0, size)
+            progress(sink.size, size)
+        # The first `overlap` bytes read must equal the tail already held.
+        pending = b"" if overlap else None
         try:
             while True:
                 data, more = self.file_read(frsm_id)
-                chunks.append(data)
-                got += len(data)
+                state.chunk = max(state.chunk, len(data))
+                if pending is not None:
+                    pending += data
+                    if len(pending) < overlap and more:
+                        continue
+                    if pending[:overlap] != sink.tail(overlap):
+                        raise _OverlapMismatch
+                    data, pending = pending[overlap:], None
+                sink.append(data)
+                state.offset = sink.size
                 if progress:
-                    progress(got, size)
+                    progress(sink.size, size)
                 if not more:
                     break
-        finally:
+        except _OverlapMismatch:
+            # Changed content, or a server that ignored initialPosition: either
+            # way these bytes cannot be continued, and seeking here is suspect.
+            self.file_close(frsm_id)
+            self._seek_refused = True
+            sink.reset()
+            state.forget()
+            self._get_once(sink, state, progress)
+            return
+        except BaseException as ex:
             try:
                 self.file_close(frsm_id)
-            except Exception:
-                pass
-        return b"".join(chunks)
+            except Iec61850Error as close_ex:
+                ex.add_note(f"FileClose of FRSM {frsm_id} also failed: {close_ex}")
+            raise
+        try:
+            self.file_close(frsm_id)
+        except Iec61850Error as ex:
+            raise MmsError(f"{state.name} was read but FileClose of FRSM {frsm_id} "
+                           f"failed, so the IED may still hold it open: {ex}") from ex
+        # sizeOfFile is a hint, not a promise: SEL relays overstate the files
+        # they generate (CFG.TXT: 2632 reported, 2267 sent, the same on every
+        # read), so a single pass ends where the server says it ends. A pass
+        # that continued earlier bytes is held to it: a length that disagrees
+        # there means the splice is suspect, and the file is read once more.
+        if overlap and size is not None and sink.size != size:
+            self._seek_refused = True
+            sink.reset()
+            state.forget()
+            self._get_once(sink, state, progress)
 
-    def download_file(self, name, local_path, progress=None):
-        """Download a file straight to disk. Returns bytes written."""
-        data = self.get_file(name, progress=progress)
-        os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
-        with open(local_path, "wb") as f:
-            f.write(data)
-        return len(data)
+
+class _OverlapMismatch(Exception):
+    """The re-read overlap differs from the bytes already held."""

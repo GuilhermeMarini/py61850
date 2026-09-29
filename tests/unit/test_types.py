@@ -12,7 +12,7 @@ import unittest
 from py61850.core import ber
 from py61850.mms import types
 from py61850.mms.pdu import CONFIRMED_ERROR
-from py61850.mms.service_error import decode_service_error
+from py61850.mms.service_error import decode_reject, decode_service_error
 
 
 def _component(name, type_tlv):
@@ -84,12 +84,32 @@ class TestServiceError(unittest.TestCase):
                        + ber.tlv(0xA2, ber.tlv(0xA0, ber.tlv(class_tag, bytes([code])))))
 
     def test_file_errors_get_names(self):
-        self.assertEqual(decode_service_error(self._error(0x8B, 6)),
+        self.assertEqual(decode_service_error(self._error(0x8B, 7)),
                          "file/file-non-existent (invoke 42)")
+
+    def test_file_error_numbering_starts_at_other(self):
+        self.assertEqual(decode_service_error(self._error(0x8B, 0)),
+                         "file/other (invoke 42)")
+        self.assertEqual(decode_service_error(self._error(0x8B, 9)),
+                         "file/insufficient-space-in-filestore (invoke 42)")
+
+    def test_file_busy_as_recorded_from_a_relay(self):
+        # FileOpen refused by an IED whose file handles were exhausted
+        pdu = bytes.fromhex("a20a800140a205a0038b0102")
+        self.assertEqual(decode_service_error(pdu), "file/file-busy (invoke 64)")
 
     def test_other_classes_report_numeric_code(self):
         self.assertEqual(decode_service_error(self._error(0x87, 3)),
                          "access/3 (invoke 42)")
+
+    def test_reject_without_invoke_id(self):
+        # RejectPDU { pdu-error invalid-pdu }
+        self.assertEqual(decode_reject(bytes.fromhex("a403850101")),
+                         "rejected: pdu-error/invalid-pdu")
+
+    def test_reject_with_unknown_reason_is_numeric(self):
+        self.assertEqual(decode_reject(bytes.fromhex("a403890105")),
+                         "rejected: conclude-request/5")
 
     def test_unknown_class(self):
         self.assertIn("class-0x8f", decode_service_error(self._error(0x8F, 1)))

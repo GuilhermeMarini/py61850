@@ -11,7 +11,72 @@ that was written at the time.
 
 ---
 
-## Unreleased
+## 0.6.0 — 2026-09-29
+
+**File downloads can retry and resume.** It is opt-in in the library and on by
+default in `mms-files`. Who drives it is the caller's choice:
+`get_file` / `download_file` take `retry=RetryPolicy(...)` and do it themselves,
+or every error they raise carries `.transfer`, a `TransferState` the caller
+passes back as `resume_from=` whenever it chooses. The command line has
+`--retries N` (default 2), `--retry-delay S` and `--continue`.
+
+How a resume is checked is not the caller's choice. MMS resumes natively, since
+FileOpen carries an `initialPosition`, but it has no checksum service. So a
+resume must report the same `sizeOfFile` as the first open (or, when the server
+reports no size, the same `lastModified`),
+and its reopen starts one chunk (at least 512 bytes) early so those bytes can be
+compared with the tail already held. The overlap is also what catches a server
+that ignores `initialPosition` and sends from byte 0; after one of those, the
+client stops seeking against that server. A failed check restarts from byte 0.
+It is never an error.
+
+Classification is structural. `MmsError` now carries `error_class` /
+`error_code` (`"file"`, `"file-busy"`), and `is_retryable` reads those rather
+than the message. Transport failures and file-busy are retryable; a missing
+file, access denied or a reject are final.
+
+**The length check applies to resumed transfers only.** When a transfer
+continued earlier bytes, its total has to equal the reported `sizeOfFile`, or
+the result is discarded and the file is read again from byte 0. A transfer read
+in one pass ends where the server says it does. Live IEDs report the size too
+loosely for it to be more than that. Schneider MiCOM (P139, P632) and GE UR
+(L90) report 0 for every file and then send tens of kilobytes. SEL relays
+overstate the files they generate: `CFG.TXT` on a 487E is reported as 2632 bytes
+and sent as 2267, identically on every read, ending on a clean line. A reported
+size of 0 is treated as unknown.
+
+One behaviour change comes with it, and it is deliberate:
+
+- **`download_file` writes through `<path>.part`** and renames the file into
+  place when complete, so `<path>` never holds a partial file. A failed download
+  leaves the `.part` and a `.part.json` sidecar for `resume=True` to continue.
+
+Measured on live IEDs, all read-only. The **GE 850D** reports size and
+lastModified and honours `initialPosition`, and a resume from byte 2048 reopened
+at 1536 and verified. The **Schneider P139 / P632** and **GE L90** report size 0,
+send no lastModified and ignore `initialPosition`. With no identity to check,
+they restart from byte 0, which is the correct result there. Every **SEL**
+tested (451, 487E, 421, 311C, 751) associated but answered FileDirectory with
+`file-access-denied` until file services were enabled in their settings. Once
+enabled, all five refuse `initialPosition` with `position-invalid`, so on SEL a
+retry restarts from byte 0, which is correct but not faster.
+
+**The size decides a resumed file's identity whenever it is known.** Siemens
+SIPROTEC 5 reports the relay's own clock as `lastModified` on every FileOpen:
+two opens of an untouched file four seconds apart gave `191844Z` and `191848Z`,
+while the directory kept the real date. Requiring `lastModified` to match would
+have refused every resume on a server that seeks correctly. On a 7SJ85 a resume
+from byte 5000 reopened at 4488 and produced an identical file, both in memory
+and from a `.part`.
+
+**SEL lastModified times are repaired.** The SEL-451 and SEL-311C pad each
+GeneralizedTime field with a space instead of a zero (`2026 928183420Z`), which
+`mms-files --list` printed garbled. `DirEntry.last_modified`, and the identity a
+resume checks, now read `20260928183420Z`. Spaces are replaced only when the
+result is a valid GeneralizedTime; anything else is passed through unchanged.
+
+`pdu.decode_file_open` (private) now returns `lastModified` as a third element.
+`FileTransfer.file_open` still returns `(frsm_id, size)`.
 
 **`ruff` and `mypy` are now part of the gate.** Nothing a caller can observe
 changes: no name added or removed, no signature moved, no behaviour different.

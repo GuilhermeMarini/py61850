@@ -34,6 +34,11 @@ Examples
     # download everything under a prefix, or every file of a type
     mms-files 192.0.2.22 --get-all --filter /EVENTS/ --out relay_files
     mms-files 192.0.2.22 --get-all --ext cfg,dat --out comtrade
+
+    # downloads retry twice by default; a flaky link can be given more, and
+    # --continue picks up the .part files an earlier, failed run left behind
+    mms-files 192.0.2.22 --get-all --ext cfg,dat --retries 5 --continue
+    mms-files 192.0.2.22 --get /CFG.TXT --retries 0        # fail fast
 """
 
 import argparse
@@ -41,7 +46,7 @@ import os
 import sys
 import time
 
-from .. import FileTransfer, MmsError, folder_of
+from .. import FileTransfer, MmsError, RetryPolicy, TransportError, folder_of
 
 
 def _hsize(n):
@@ -185,9 +190,24 @@ def cmd_list(c, args):
     print(f"{len(entries)} files, {total:,} bytes reported")
 
 
+def _retry_kwargs(args):
+    """--retries / --retry-delay as the library's policy, with a line on stderr
+    before each retry so a stalled download does not look like a hang."""
+    if args.retries <= 0:
+        return {}
+    policy = RetryPolicy(retries=args.retries, delay=args.retry_delay)
+
+    def report(attempt, ex, offset):
+        where = f"resuming at {offset:,} bytes" if offset else "from the start"
+        print(f"\n  [retry {attempt}/{policy.retries}] {ex}; {where} in "
+              f"{policy.delay_before(attempt):.0f}s", file=sys.stderr)
+
+    return {"retry": policy, "on_retry": report}
+
+
 def cmd_view(c, args):
     name = args.view
-    data = c.get_file(name)
+    data = c.get_file(name, **_retry_kwargs(args))
     sys.stdout.write(f"===== {name}  ({len(data):,} bytes) =====\n")
     limit = None if args.full else args.max_view
     chunk = data if limit is None else data[:limit]
@@ -209,9 +229,21 @@ def cmd_get(c, args):
     name = args.get
     local = args.out_path or _local_path(args.out, name)
     bar = ProgressBar(0, label=os.path.basename(name))   # size learned from FileOpen
-    n = c.download_file(name, local, progress=bar.update)
+    try:
+        n = c.download_file(name, local, progress=bar.update,
+                            resume=args.resume, **_retry_kwargs(args))
+    except BaseException:
+        bar.finish(complete=False)
+        _hint_part(local)
+        raise
     bar.finish()
     print(f"  saved -> {local}  ({n:,} bytes)")
+
+
+def _hint_part(local):
+    if os.path.exists(local + ".part"):         # removed when nothing arrived
+        print(f"  partial download kept in {local}.part -- run again with "
+              f"--continue to resume it", file=sys.stderr)
 
 
 def cmd_get_all(c, args):
@@ -219,7 +251,7 @@ def cmd_get_all(c, args):
     grand_total = sum(e.size for e in entries)
     print(f"downloading {len(entries)} files ({_hsize(grand_total)}) into {args.out}/ ...")
 
-    ok = 0
+    ok = failed = 0
     done_bytes = 0
     start = time.monotonic()
     for i, e in enumerate(entries, 1):
@@ -227,7 +259,8 @@ def cmd_get_all(c, args):
         prefix = f"[{i:>3}/{len(entries)}] "
         bar = ProgressBar(e.size, label=os.path.basename(e.name), prefix=prefix)
         try:
-            n = c.download_file(e.name, local, progress=bar.update)
+            n = c.download_file(e.name, local, progress=bar.update,
+                                resume=args.resume, **_retry_kwargs(args))
             bar.finish()
             done_bytes += n
             ok += 1
@@ -239,7 +272,13 @@ def cmd_get_all(c, args):
         except Exception as ex:
             bar.finish(complete=False)
             print(f"  [FAIL] {e.name}: {ex}")
+            failed += 1
     print(f"done: {ok}/{len(entries)} files, {_hsize(done_bytes)} -> {args.out}/")
+    if failed:
+        print(f"{failed} failed; partial downloads are kept as .part files -- run "
+              f"again with --continue to resume them", file=sys.stderr)
+        return 1
+    return 0
 
 
 def main(argv=None):
@@ -287,14 +326,29 @@ def main(argv=None):
                     help="--search: print one full path per line, ungrouped")
     ap.add_argument("--folders", action="store_true",
                     help="--search: print only the folders that hold matches")
+
+    rt = ap.add_argument_group(
+        "retry and resume (--get, --get-all, --view)")
+    rt.add_argument("--retries", type=int, default=2, metavar="N",
+                    help="retry a failed download N times: reconnect after a "
+                         "dropped connection, back off on file-busy, and resume "
+                         "from the bytes already received (default 2; 0 = fail "
+                         "fast)")
+    rt.add_argument("--retry-delay", type=float, default=1.0, metavar="S",
+                    help="seconds before the first retry; each later one waits "
+                         "3x longer, up to 30s (default 1)")
+    rt.add_argument("-c", "--continue", dest="resume", action="store_true",
+                    help="resume the .part files an earlier run left, after "
+                         "checking they are still the same file on the relay "
+                         "(default: download again from the start)")
     args = ap.parse_args(argv)
 
     args.ext = [x.strip() for group in (args.ext or [])
                 for x in group.split(",") if x.strip()]
 
     c = FileTransfer(args.host, args.port, timeout=args.timeout)
-    c.connect()
     try:
+        c.connect()
         if args.list:
             cmd_list(c, args)
         elif args.search is not None:
@@ -304,13 +358,20 @@ def main(argv=None):
         elif args.get:
             cmd_get(c, args)
         elif args.get_all:
-            cmd_get_all(c, args)
+            return cmd_get_all(c, args)
+    except TransportError as ex:
+        print(f"\nconnection error: {ex}", file=sys.stderr)
+        return 2
     except MmsError as ex:
         print(f"\nMMS error: {ex}", file=sys.stderr)
-        if "file/" in str(ex):
-            print("  (file-class errors often mean the relay's file-transfer\n"
-                  "   handles are busy/exhausted; retry shortly, or the file is\n"
-                  "   locked/being written by the relay.)", file=sys.stderr)
+        if ex.error_code == "file-access-denied":
+            print("  (some IEDs refuse all file services unless they are enabled\n"
+                  "   in the IED's own settings -- every SEL tested does.)",
+                  file=sys.stderr)
+        elif ex.error_code == "file-busy":
+            print("  (the relay's file-transfer handles are busy or exhausted;\n"
+                  "   try again shortly, or raise --retries / --retry-delay.)",
+                  file=sys.stderr)
         return 2
     finally:
         c.close()

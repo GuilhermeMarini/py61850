@@ -46,7 +46,7 @@ Concretely, that means three things for any change here:
 pip install -e .          # from a checkout (editable)
 # or, once published/tagged:
 # pip install py61850
-# pip install "git+https://github.com/OWNER/py61850@v0.5.0"
+# pip install "git+https://github.com/OWNER/py61850@v0.6.0"
 ```
 
 Requires **Python ≥ 3.13** (raised from 3.9 in 0.5.0 — see
@@ -114,6 +114,51 @@ with FileTransfer("192.0.2.22") as ft:
     ft.download_file("/EVENTS/C4_10117.TXT", "out/C4_10117.TXT",
                      progress=lambda got, total: print(f"{got}/{total}"))
 ```
+
+Retries and resumes are opt-in, and you can hand them to the library or run
+them yourself. Either way the library checks a resume before trusting it: same
+size and last-modified time, a re-read overlap that matches the bytes already
+held, and a final length that matches the reported size. Anything that fails a
+check starts again from byte 0:
+
+```python
+from py61850 import FileTransfer, Iec61850Error, RetryPolicy, is_retryable
+
+with FileTransfer("192.0.2.22") as ft:
+    # the library owns it: back off on file-busy, reconnect, resume
+    ft.download_file("/EVENTS/C4.DAT", "out/C4.DAT", retry=RetryPolicy(retries=3))
+
+    # you own it: every error carries where the transfer stopped
+    try:
+        data = ft.get_file("/EVENTS/C4.DAT")
+    except Iec61850Error as ex:
+        if not is_retryable(ex):
+            raise
+        ft.close(); ft.connect()                        # when and how you choose
+        data = ft.get_file("/EVENTS/C4.DAT", resume_from=ex.transfer)
+```
+
+`download_file` writes through `out/C4.DAT.part` and renames the file into place
+only once it is complete. A failed download leaves the `.part` behind, and
+`resume=True`, or `mms-files --continue`, picks it up on a later run.
+
+Whether a resume saves anything depends on the IED. Retry works on all of them.
+A resume only helps where the server seeks and reports something to check the
+file against: its size or, if there is no size, its lastModified.
+Everywhere else the library detects that and restarts from byte 0, which is
+correct but no faster. Measured read-only on live IEDs:
+
+| IED | `sizeOfFile` from FileOpen | `lastModified` from FileOpen | `initialPosition` | Resume |
+|---|---|---|---|---|
+| SEL-451, 751, 487E, 421, 311C | exact; overstated for generated files (`CFG.TXT`) | space-padded (repaired) | refused: `position-invalid` | restarts from 0 |
+| Schneider MiCOM P139, P632 | always 0 | absent | ignored, sends from 0 | restarts from 0 |
+| GE UR L90 | always 0 | absent | ignored, sends from 0 | restarts from 0 |
+| GE 850D | exact | the file's date | honoured | **resumes** |
+| Siemens 7SJ85, 7UT85, and a third Siemens unit | exact | the relay's current time, new on every open | honoured | **resumes** |
+
+File services must be enabled in the IED's own settings. SEL relays answer every
+listing with `file-access-denied` until they are. The GE C70 lists its files but
+was not read-tested.
 
 ### Reading an SCL file — and writing it back unchanged
 
