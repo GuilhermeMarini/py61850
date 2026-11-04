@@ -57,9 +57,19 @@ def _hsize(n):
         n /= 1024.0
 
 
+def _htime(seconds):
+    """A duration for people: '0.4s', '6m17s', '1h02m05s'. Tenths under a minute,
+    where they still say something about a quick file."""
+    if seconds < 59.95:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{secs:02d}s" if hours else f"{minutes}m{secs:02d}s"
+
+
 class ProgressBar:
-    """In-place progress bar with %, bytes, speed and ETA. Renders on a TTY;
-    degrades to periodic newline updates when output is redirected."""
+    """In-place progress bar with %, bytes, speed, elapsed time and ETA. Renders
+    on a TTY; degrades to periodic newline updates when output is redirected."""
 
     def __init__(self, total, label="", width=28, stream=None, prefix=""):
         self.total = total or 0
@@ -72,6 +82,12 @@ class ProgressBar:
         self.last_draw = 0.0
         self.got = 0
         self._complete = False
+
+    @property
+    def elapsed(self):
+        """Seconds since the bar was made, retries and back-offs included: how
+        long the file really took, not how long its last attempt did."""
+        return time.monotonic() - self.start
 
     def update(self, got, total=None):
         if total and not self.total:
@@ -93,10 +109,12 @@ class ProgressBar:
             eta = (self.total - self.got) / speed if speed > 0 else 0
             line = (f"{self.prefix}{self.label} [{bar}] {frac*100:5.1f}%  "
                     f"{_hsize(self.got)}/{_hsize(self.total)}  "
-                    f"{_hsize(speed)}/s  eta {eta:4.0f}s")
+                    f"{_hsize(speed)}/s  elapsed {_htime(elapsed)}")
+            if not self._complete:
+                line += f"  eta {_htime(eta)}"
         else:
             line = (f"{self.prefix}{self.label}  {_hsize(self.got)}  "
-                    f"{_hsize(speed)}/s")
+                    f"{_hsize(speed)}/s  elapsed {_htime(elapsed)}")
         if self.tty:
             self.stream.write("\r\033[K" + line)
         else:
@@ -237,7 +255,7 @@ def cmd_get(c, args):
         _hint_part(local)
         raise
     bar.finish()
-    print(f"  saved -> {local}  ({n:,} bytes)")
+    print(f"  saved -> {local}  ({n:,} bytes in {_htime(bar.elapsed)})")
 
 
 def _hint_part(local):
@@ -268,12 +286,14 @@ def cmd_get_all(c, args):
             elapsed = max(time.monotonic() - start, 1e-6)
             pct = 100.0 * done_bytes / grand_total if grand_total else 0
             print(f"        overall {ok}/{len(entries)}  {_hsize(done_bytes)}"
-                  f"/{_hsize(grand_total)} ({pct:.0f}%)  avg {_hsize(done_bytes/elapsed)}/s")
+                  f"/{_hsize(grand_total)} ({pct:.0f}%)  avg {_hsize(done_bytes/elapsed)}/s"
+                  f"  elapsed {_htime(elapsed)}")
         except Exception as ex:
             bar.finish(complete=False)
             print(f"  [FAIL] {e.name}: {ex}")
             failed += 1
-    print(f"done: {ok}/{len(entries)} files, {_hsize(done_bytes)} -> {args.out}/")
+    print(f"done: {ok}/{len(entries)} files, {_hsize(done_bytes)} -> {args.out}/ "
+          f"in {_htime(time.monotonic() - start)}")
     if failed:
         print(f"{failed} failed; partial downloads are kept as .part files -- run "
               f"again with --continue to resume them", file=sys.stderr)
