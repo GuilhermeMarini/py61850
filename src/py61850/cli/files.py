@@ -57,9 +57,19 @@ def _hsize(n):
         n /= 1024.0
 
 
+def _htime(seconds):
+    """A duration for people: '0.4s', '6m17s', '1h02m05s'. Tenths under a minute,
+    where they still say something about a quick file."""
+    if seconds < 59.95:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{secs:02d}s" if hours else f"{minutes}m{secs:02d}s"
+
+
 class ProgressBar:
-    """In-place progress bar with %, bytes, speed and ETA. Renders on a TTY;
-    degrades to periodic newline updates when output is redirected."""
+    """In-place progress bar with %, bytes, speed, elapsed time and ETA. Renders
+    on a TTY; degrades to periodic newline updates when output is redirected."""
 
     def __init__(self, total, label="", width=28, stream=None, prefix=""):
         self.total = total or 0
@@ -72,6 +82,12 @@ class ProgressBar:
         self.last_draw = 0.0
         self.got = 0
         self._complete = False
+
+    @property
+    def elapsed(self):
+        """Seconds since the bar was made, retries and back-offs included: how
+        long the file really took, not how long its last attempt did."""
+        return time.monotonic() - self.start
 
     def update(self, got, total=None):
         if total and not self.total:
@@ -93,10 +109,12 @@ class ProgressBar:
             eta = (self.total - self.got) / speed if speed > 0 else 0
             line = (f"{self.prefix}{self.label} [{bar}] {frac*100:5.1f}%  "
                     f"{_hsize(self.got)}/{_hsize(self.total)}  "
-                    f"{_hsize(speed)}/s  eta {eta:4.0f}s")
+                    f"{_hsize(speed)}/s  elapsed {_htime(elapsed)}")
+            if not self._complete:
+                line += f"  eta {_htime(eta)}"
         else:
             line = (f"{self.prefix}{self.label}  {_hsize(self.got)}  "
-                    f"{_hsize(speed)}/s")
+                    f"{_hsize(speed)}/s  elapsed {_htime(elapsed)}")
         if self.tty:
             self.stream.write("\r\033[K" + line)
         else:
@@ -190,6 +208,31 @@ def cmd_list(c, args):
     print(f"{len(entries)} files, {total:,} bytes reported")
 
 
+SHORT_NOTE = ("  Relays overstate some generated files: if a second read gives "
+              "the same length, that is all this is.")
+
+
+class ShortFile:
+    """``on_short`` for one download. It holds the figures until the bar is
+    done, so that the warning does not land in the middle of it."""
+
+    def __init__(self, name):
+        self.name = name
+        self.figures = None
+
+    def __call__(self, got, reported):
+        self.figures = got, reported
+
+    def report(self):
+        """Say so if the file came up short. Returns whether it did."""
+        if self.figures is None:
+            return False
+        got, reported = self.figures
+        print(f"  [short] {self.name}: {got:,} of the {reported:,} bytes the relay "
+              f"reported", file=sys.stderr)
+        return True
+
+
 def _retry_kwargs(args):
     """--retries / --retry-delay as the library's policy, with a line on stderr
     before each retry so a stalled download does not look like a hang."""
@@ -207,7 +250,8 @@ def _retry_kwargs(args):
 
 def cmd_view(c, args):
     name = args.view
-    data = c.get_file(name, **_retry_kwargs(args))
+    short = ShortFile(name)
+    data = c.get_file(name, on_short=short, **_retry_kwargs(args))
     sys.stdout.write(f"===== {name}  ({len(data):,} bytes) =====\n")
     limit = None if args.full else args.max_view
     chunk = data if limit is None else data[:limit]
@@ -218,6 +262,8 @@ def cmd_view(c, args):
     if limit is not None and len(data) > limit:
         sys.stdout.write(f"\n... [truncated at {limit} bytes; use --full] ...\n")
     sys.stdout.write("\n")
+    if short.report():
+        print(SHORT_NOTE, file=sys.stderr)
 
 
 def _local_path(outdir, remote_name):
@@ -229,15 +275,18 @@ def cmd_get(c, args):
     name = args.get
     local = args.out_path or _local_path(args.out, name)
     bar = ProgressBar(0, label=os.path.basename(name))   # size learned from FileOpen
+    short = ShortFile(name)
     try:
-        n = c.download_file(name, local, progress=bar.update,
+        n = c.download_file(name, local, progress=bar.update, on_short=short,
                             resume=args.resume, **_retry_kwargs(args))
     except BaseException:
         bar.finish(complete=False)
         _hint_part(local)
         raise
     bar.finish()
-    print(f"  saved -> {local}  ({n:,} bytes)")
+    print(f"  saved -> {local}  ({n:,} bytes in {_htime(bar.elapsed)})")
+    if short.report():
+        print(SHORT_NOTE, file=sys.stderr)
 
 
 def _hint_part(local):
@@ -251,29 +300,37 @@ def cmd_get_all(c, args):
     grand_total = sum(e.size for e in entries)
     print(f"downloading {len(entries)} files ({_hsize(grand_total)}) into {args.out}/ ...")
 
-    ok = failed = 0
+    ok = failed = shorts = 0
     done_bytes = 0
     start = time.monotonic()
     for i, e in enumerate(entries, 1):
         local = _local_path(args.out, e.name)
         prefix = f"[{i:>3}/{len(entries)}] "
         bar = ProgressBar(e.size, label=os.path.basename(e.name), prefix=prefix)
+        short = ShortFile(e.name)
         try:
-            n = c.download_file(e.name, local, progress=bar.update,
+            n = c.download_file(e.name, local, progress=bar.update, on_short=short,
                                 resume=args.resume, **_retry_kwargs(args))
             bar.finish()
+            shorts += short.report()
             done_bytes += n
             ok += 1
             # overall summary line under each file
             elapsed = max(time.monotonic() - start, 1e-6)
             pct = 100.0 * done_bytes / grand_total if grand_total else 0
             print(f"        overall {ok}/{len(entries)}  {_hsize(done_bytes)}"
-                  f"/{_hsize(grand_total)} ({pct:.0f}%)  avg {_hsize(done_bytes/elapsed)}/s")
+                  f"/{_hsize(grand_total)} ({pct:.0f}%)  avg {_hsize(done_bytes/elapsed)}/s"
+                  f"  elapsed {_htime(elapsed)}")
         except Exception as ex:
             bar.finish(complete=False)
             print(f"  [FAIL] {e.name}: {ex}")
             failed += 1
-    print(f"done: {ok}/{len(entries)} files, {_hsize(done_bytes)} -> {args.out}/")
+    print(f"done: {ok}/{len(entries)} files, {_hsize(done_bytes)} -> {args.out}/ "
+          f"in {_htime(time.monotonic() - start)}")
+    if shorts:
+        print(f"{shorts} file{'s' if shorts != 1 else ''} ended short of the size "
+              f"the relay reported.", file=sys.stderr)
+        print(SHORT_NOTE, file=sys.stderr)
     if failed:
         print(f"{failed} failed; partial downloads are kept as .part files -- run "
               f"again with --continue to resume them", file=sys.stderr)

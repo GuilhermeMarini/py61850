@@ -142,6 +142,13 @@ with FileTransfer("192.0.2.22") as ft:
 only once it is complete. A failed download leaves the `.part` behind, and
 `resume=True`, or `mms-files --continue`, picks it up on a later run.
 
+A file that ends with fewer bytes than FileOpen reported is still returned,
+because relays overstate some files they generate. Pass
+`on_short=lambda got, reported: ...` to `get_file` or `download_file` to be told;
+`mms-files` prints a `[short]` line. Read the file again to tell the two apart:
+an overstated file comes back the same length every time. A server that reports
+no size cannot be checked.
+
 Whether a resume saves anything depends on the IED. Retry works on all of them.
 A resume only helps where the server seeks and reports something to check the
 file against: its size or, if there is no size, its lastModified.
