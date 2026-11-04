@@ -638,6 +638,66 @@ class TestRetryAndResume(unittest.TestCase):
             c.get_file("/E/C4.DAT")
         return c, cm.exception
 
+    # ---- a file that ends before its reported size --------------------------
+    def tail(self):
+        """The last FileRead of a file that stops 500 bytes early."""
+        return self._read(CHUNKS[2][:100], more=False)
+
+    def ends_short(self, size=SIZE):
+        return make_client(FileTransfer, [self.open_(size=size), self.read(0),
+                                          self.read(1), self.tail(), CLOSED])
+
+    def test_a_short_file_is_returned_and_reported(self):
+        seen = []
+        data = self.ends_short().get_file("/E/C4.DAT", on_short=lambda *a: seen.append(a))
+        self.assertEqual(data, BODY[:1300])
+        self.assertEqual(seen, [(1300, SIZE)])
+
+    def test_a_short_file_needs_no_listener(self):
+        self.assertEqual(self.ends_short().get_file("/E/C4.DAT"), BODY[:1300])
+
+    def test_a_file_of_exactly_the_reported_size_is_not_reported(self):
+        seen = []
+        c = self.ends_short(size=1300)
+        c.get_file("/E/C4.DAT", on_short=lambda *a: seen.append(a))
+        self.assertEqual(seen, [])
+
+    def test_a_file_longer_than_reported_is_not_reported(self):
+        seen = []
+        c = self.ends_short(size=1000)
+        c.get_file("/E/C4.DAT", on_short=lambda *a: seen.append(a))
+        self.assertEqual(seen, [])
+
+    def test_a_server_reporting_no_size_cannot_be_checked(self):
+        seen = []
+        c = self.ends_short(size=0)
+        c.get_file("/E/C4.DAT", on_short=lambda *a: seen.append(a))
+        self.assertEqual(seen, [])
+
+    def test_download_file_saves_a_short_file_and_reports_it(self):
+        seen = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "C4.DAT")
+            n = self.ends_short().download_file("/E/C4.DAT", path,
+                                                on_short=lambda *a: seen.append(a))
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), BODY[:1300])
+        self.assertEqual(n, 1300)
+        self.assertEqual(seen, [(1300, SIZE)])
+
+    def test_a_short_file_is_reported_once_however_many_passes_it_took(self):
+        c = make_client(FileTransfer, [
+            self.open_(), self.read(0), self.read(1),
+            TransportError("timed out"), CLOSED,               # the close note
+            INITIATE,
+            self.open_(), self.read(1), self.tail(), CLOSED,   # resumed, comes up short
+            self.open_(), self.read(0), self.read(1), self.tail(), CLOSED])  # read again
+        seen = []
+        data = c.get_file("/E/C4.DAT", retry=RetryPolicy(delay=0),
+                          on_short=lambda *a: seen.append(a))
+        self.assertEqual(data, BODY[:1300])
+        self.assertEqual(seen, [(1300, SIZE)])
+
     # ---- the caller owns the policy ----------------------------------------
     def test_every_error_carries_where_the_transfer_stopped(self):
         _, ex = self.interrupted()

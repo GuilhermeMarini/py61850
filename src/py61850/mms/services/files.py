@@ -242,7 +242,7 @@ class FileServicesMixin:
 
     # ---- GetFile (high level) --------------------------------------------
     def get_file(self, name, progress=None, *, retry=None, resume_from=None,
-                 on_retry=None):
+                 on_retry=None, on_short=None):
         """Download a file fully into memory. Returns the bytes.
 
         `progress(bytes_so_far, reported_size)` is called once when the file is
@@ -269,6 +269,12 @@ class FileServicesMixin:
         A resume is verified before it is trusted (see
         :mod:`py61850.mms.services.transfer`); one that fails verification
         restarts from byte 0.
+
+        ``on_short(got, reported)`` is called once when the file ends with
+        fewer bytes than FileOpen reported. The bytes are still returned: SEL
+        relays overstate files they generate, by the same amount on every
+        read, so a short file is a reason to read it again, not proof that it
+        is wrong. A server that reports no size cannot be checked.
         """
         state = TransferState(name)
         sink = MemorySink()
@@ -282,11 +288,11 @@ class FileServicesMixin:
             state = replace(resume_from, data=None, path=None)
             sink = MemorySink(resume_from.data)
             state.offset = sink.size
-        self._get(sink, state, progress, retry, on_retry)
+        self._get(sink, state, progress, retry, on_retry, on_short)
         return bytes(sink.buf)
 
     def download_file(self, name, local_path, progress=None, *, retry=None,
-                      resume=False, on_retry=None):
+                      resume=False, on_retry=None, on_short=None):
         """Download a file straight to disk. Returns bytes written.
 
         Bytes go to ``local_path + ".part"`` as they arrive and the file is
@@ -306,7 +312,7 @@ class FileServicesMixin:
             state = TransferState(name)
         state.offset = sink.size
         try:
-            self._get(sink, state, progress, retry, on_retry)
+            self._get(sink, state, progress, retry, on_retry, on_short)
         except BaseException:
             sink.close()
             raise
@@ -314,7 +320,7 @@ class FileServicesMixin:
         return state.offset
 
     # ---- the transfer loop -------------------------------------------------
-    def _get(self, sink, state, progress, retry, on_retry):
+    def _get(self, sink, state, progress, retry, on_retry, on_short):
         """Run one GetFile into `sink`, retrying as `retry` allows."""
         attempt = 0
         # A client whose association died on an earlier file starts on a new one.
@@ -326,7 +332,7 @@ class FileServicesMixin:
                     self.connect()
                     reconnect = False
                 self._get_once(sink, state, progress)
-                return
+                break
             except Iec61850Error as ex:
                 state.offset = sink.size
                 sink.fill(state)
@@ -342,6 +348,8 @@ class FileServicesMixin:
                 if not retry.resume:
                     sink.reset()
                     state.forget()
+        if on_short and state.size is not None and sink.size < state.size:
+            on_short(sink.size, state.size)
 
     def _open_identified(self, name, initial_position=0):
         """FileOpen for GetFile, with a reported size of 0 read as unknown.

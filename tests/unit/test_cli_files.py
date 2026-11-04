@@ -29,7 +29,8 @@ CHUNK = 600
 class FakeRelay:
     """Stands in for CotpTransport and serves BODY, CHUNK bytes to a FileRead."""
 
-    def __init__(self):
+    def __init__(self, sends=BODY):
+        self.sends = sends                  # FileOpen always reports len(BODY)
         self.answers = deque()
         self.pos = 0
 
@@ -60,7 +61,7 @@ class FakeRelay:
             reply = ber.tlv(0x80, ber.enc_int(1)) + ber.tlv(
                 0xA1, ber.tlv(0x80, ber.enc_uint(len(BODY))))
         elif service == pdu.SVC_FILE_READ:
-            data = BODY[self.pos:self.pos + CHUNK]
+            data = self.sends[self.pos:self.pos + CHUNK]
             self.pos += len(data)
             reply = ber.tlv(0x80, data) + ber.tlv(0x81, b"\xff" if data else b"\x00")
         else:
@@ -132,24 +133,25 @@ class TestProgressBar(unittest.TestCase):
 
 class TestDownloadCommands(unittest.TestCase):
     DURATION = r"[\d.hms]+"
+    sends = BODY
 
-    @staticmethod
-    def client(*args, **kwargs):
+    def client(self, *args, **kwargs):
         c = FileTransfer("192.0.2.1")
-        c.t = FakeRelay()
+        c.t = FakeRelay(self.sends)
         return c
 
     def run_cli(self, *argv):
-        out = io.StringIO()
+        out, err = io.StringIO(), io.StringIO()
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(cli, "FileTransfer", self.client), \
                 mock.patch.object(cli, "_select", lambda *a, **k: [
                     DirEntry("/E/A.DAT", len(BODY), None),
                     DirEntry("/E/B.DAT", len(BODY), None)]), \
-                contextlib.redirect_stderr(io.StringIO()), \
+                contextlib.redirect_stderr(err), \
                 contextlib.redirect_stdout(out):
             code = cli.main(["192.0.2.1", *argv, "--out", tmp])
             self.assertFalse(code)
+            self.err = err.getvalue()
             return out.getvalue(), os.path.basename(tmp)
 
     def test_get_says_how_long_the_file_took(self):
@@ -164,6 +166,32 @@ class TestDownloadCommands(unittest.TestCase):
     def test_get_all_ends_with_the_total(self):
         out, tmp = self.run_cli("--get-all")
         self.assertRegex(out, rf"done: 2/2 files, .* -> .*{tmp}/ in {self.DURATION}")
+
+    def test_get_saves_a_short_file_and_says_so(self):
+        self.sends = BODY[:1000]
+        out, _ = self.run_cli("--get", "/E/A.DAT")
+        self.assertIn("saved -> ", out)
+        self.assertIn("(1,000 bytes in ", out)
+        self.assertIn("[short] /E/A.DAT: 1,000 of the 3,072 bytes the relay reported",
+                      self.err)
+        self.assertIn(cli.SHORT_NOTE, self.err)
+
+    def test_a_complete_file_gets_no_warning(self):
+        self.run_cli("--get", "/E/A.DAT")
+        self.assertNotIn("[short]", self.err)
+        self.assertNotIn(cli.SHORT_NOTE, self.err)
+
+    def test_view_says_so_too(self):
+        self.sends = BODY[:1000]
+        self.run_cli("--view", "/E/A.DAT")
+        self.assertIn("[short] /E/A.DAT", self.err)
+
+    def test_get_all_names_each_short_file_and_counts_them(self):
+        self.sends = BODY[:1000]
+        self.run_cli("--get-all")
+        self.assertEqual(self.err.count("[short]"), 2)
+        self.assertEqual(self.err.count(cli.SHORT_NOTE), 1)
+        self.assertIn("2 files ended short of the size the relay reported.", self.err)
 
 
 if __name__ == "__main__":
